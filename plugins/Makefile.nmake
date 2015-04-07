@@ -17,7 +17,8 @@ PLUGIN_LIST = \
 	unistim     \
 	wimax       \
 	wimaxasncp  \
-	wimaxmacphy
+	wimaxmacphy \
+	aeron
 
 
 all:
