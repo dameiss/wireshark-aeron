@@ -572,6 +572,7 @@ rpathify_files () {
 	# Fix bundle deps
 	#
 	rpathify_dir "$pkglib" "*.dylib"
+	rpathify_dir "$pkgplugin" "*.so"
 	if [ "$ui_toolkit" = "gtk" ] ; then
 		rpathify_dir "$pkglib/gtk-2.0/$gtk_version/loaders" "*.so"
 		rpathify_dir "$pkglib/gtk-2.0/$gtk_version/engines" "*.so"
