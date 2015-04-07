@@ -1,0 +1,61 @@
+#!/bin/sh
+# Copyright 2013, Alexis La Goutte (See AUTHORS file)
+#
+# For git user: copy pre-commit to .git/hook/ folder
+#   To not launch the script when committing, use --no-verify argument
+#
+# From
+# http://mark-story.com/posts/view/using-git-commit-hooks-to-prevent-stupid-mistakes
+#
+
+unset GREP_OPTIONS
+
+if [ -z $GIT_DIR ]; then GIT_DIR=".git"; fi
+
+if [ -z $1 ]; then
+    COMMIT_ID="HEAD"
+else
+    COMMIT_ID=$1
+fi
+
+
+# Check for newer versions of the pre-commit script
+if [ ${GIT_DIR}/hooks/pre-commit -ot ./tools/pre-commit ]; then
+    echo "Pre-commit hook script is outdated, please update!"
+fi
+
+exit_status=0
+
+for FILE in `git diff-index --cached --name-status ${COMMIT_ID} | grep -v "^D" | cut -f2 | grep "\.[ch]$"` ; do
+
+    #Check if checkhf is good
+    ./tools/checkhf.pl $FILE            || exit_status=1
+
+    #Check if checkAPIs is good
+    ./tools/checkAPIs.pl -p $FILE       || exit_status=1
+
+    #Check if fix-encoding-args is good
+    ./tools/fix-encoding-args.pl $FILE  || exit_status=1
+
+    #Check if checkfiltername is good
+    ./tools/checkfiltername.pl $FILE  || exit_status=1
+
+done
+
+# If there are whitespace errors, print the offending file names and fail. (from git pre-commit.sample)
+git diff-index --check --cached ${COMMIT_ID}    || exit_status=1
+
+exit $exit_status
+
+#
+#  Editor modelines
+#
+#  Local Variables:
+#  c-basic-offset: 4
+#  tab-width: 8
+#  indent-tabs-mode: nil
+#  End:
+#
+#  ex: set shiftwidth=4 tabstop=8 expandtab:
+#  :indentSize=4:tabSize=8:noTabs=true:
+#

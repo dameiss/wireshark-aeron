@@ -1,0 +1,69 @@
+commit 16b5866
+Author: Gerald Combs <gerald@wireshark.org>
+Date:   Thu Mar 19 16:27:30 2015 -0700
+
+    Build 1.99.5.
+    
+    Change-Id: I50505b48db1f14523f36a19a5e8232caff1e712a
+
+commit 751df4e
+Author: Gerald Combs <gerald@wireshark.org>
+Date:   Thu Mar 19 15:33:39 2015 -0700
+
+    Try to fix interface property fetching.
+    
+    Use g_strdup instead of calculating string lengths manually. Return NULL
+    for empty strings, otherwise lo0 shows up as ": lo0" instead of
+    "Loopback: lo0" here.
+    
+    Change-Id: I143aa5e12c9512b7a9f4729b62b353c13ee3635a
+    Reviewed-on: https://code.wireshark.org/review/7764
+    Reviewed-by: Gerald Combs <gerald@wireshark.org>
+
+commit bc06ca2
+Author: Gerald Combs <gerald@wireshark.org>
+Date:   Thu Mar 19 19:20:18 2015 +0000
+
+    Revert "Revert "TCP: tabs -> spaces""
+    
+    1.99.4 is done.
+    
+    This reverts commit e60b826a0131b90d4a10d3e9e5e1f45e777d3142.
+    
+    Change-Id: I230b12d3a83a0abcb93809321df2b4396a7f0a0b
+    Reviewed-on: https://code.wireshark.org/review/7760
+    Reviewed-by: Gerald Combs <gerald@wireshark.org>
+
+commit cc7e565
+Author: Gerald Combs <gerald@wireshark.org>
+Date:   Thu Mar 19 12:12:34 2015 -0700
+
+    1.99.4 → 1.99.5.
+    
+    Change-Id: Ifa1a57ac2db5d921d9b53dbe997cfa1916720c26
+    Reviewed-on: https://code.wireshark.org/review/7759
+    Reviewed-by: Gerald Combs <gerald@wireshark.org>
+
+commit e60b826
+Author: Gerald Combs <gerald@wireshark.org>
+Date:   Thu Mar 19 19:04:28 2015 +0000
+
+    Revert "TCP: tabs -> spaces"
+    
+    The 1.99.4 is still in progress.
+    
+    This reverts commit 260c84729c8c32d6e312d0974d4d4c5966aee514.
+    
+    Change-Id: I8c24d301c103dd45e2ac2cdb4cda34b918ac5a37
+    Reviewed-on: https://code.wireshark.org/review/7758
+    Reviewed-by: Gerald Combs <gerald@wireshark.org>
+
+commit 260c847
+Author: Pascal Quantin <pascal.quantin@gmail.com>
+Date:   Thu Mar 19 18:47:19 2015 +0100
+
+    TCP: tabs -> spaces
+    
+    Change-Id: Ia95addb6b26f7eed89bbfe62baea289a50cf0523
+    Reviewed-on: https://code.wireshark.org/review/7756
+    Reviewed-by: Alexis La Goutte <alexis.lagoutte@gmail.com>

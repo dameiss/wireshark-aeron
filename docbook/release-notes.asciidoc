@@ -1,0 +1,250 @@
+= Wireshark wireshark-version:[] Release Notes
+// AsciiDoc quick reference: http://powerman.name/doc/asciidoc
+
+This is an experimental release intended to test new features for Wireshark 2.0.
+
+== What is Wireshark?
+
+Wireshark is the world's most popular network protocol analyzer. It is
+used for troubleshooting, analysis, development and education.
+
+== What's New
+
+//=== Bug Fixes
+
+//The following bugs have been fixed:
+
+//* ws-buglink:5000[]
+//* ws-buglink:6000[Wireshark bug]
+//* cve-idlink:2014-2486[]
+//* Wireshark insists on calling you on your land line which is keeping you from abandoning it for cellular. (ws-buglink:0000[])
+
+=== New and Updated Features
+
+The following features are new (or have been significantly updated)
+since version 1.99.3:
+
+* Qt port:
+
+** Several interface bugs have been fixed.
+** Translations have been updated.
+
+The following features are new (or have been significantly updated)
+since version 1.99.2:
+
+* Qt port:
+
+** Several bugs have been fixed.
+** You can now open a packet in a new window.
+** The Bluetooth ATT Server Attributes dialog has been added.
+** The Coloring Rules dialog has been added.
+** Many translations have been updated. Chinese, Italian and Polish
+   translations are complete.
+** General user interface and usability improvements.
+** Automatic scrolling during capture now works.
+** The related packet indicator has been updated.
+
+The following features are new (or have been significantly updated)
+since version 1.99.1:
+
+* Qt port:
+
+** The welcome screen layout has been updated.
+** The Preferences dialog no longer crashes on Windows.
+** The packet list header menu has been added.
+** Statistics tree plugins are now supported.
+** The window icon is now displayed properly in the Windows taskbar.
+** A packet list an byte view selection bug has been fixed (ws-buglink:10896[])
+** The RTP Streams dialog has been added.
+** The Protocol Hierarchy Statistics dialog has been added.
+
+The following features are new (or have been significantly updated)
+since version 1.99.0:
+
+* Qt port:
+
+** You can now show and hide toolbars and major widgets using the View menu.
+** You can now set the time display format and precision.
+** The byte view widget is much faster, particularly when selecting large
+reassembled packets.
+** The byte view is explorable. Hovering over it highlights the corresponding
+field and shows a description in the status bar.
+** An Italian translation has been added.
+** The Summary dialog has been updated and renamed to Capture File Properties.
+** The VoIP Calls and SIP Flows dialogs have been added.
+** Support for HiDPI / Retina displays has been improved in the official packages.
+
+* DNS stats:
+     + A new stats tree has been added to the Statistics menu. Now it
+       is possible to collect stats such as qtype/qclass distribution,
+       number of resource record per response section, and stats data
+       (min, max, avg) for values such as query name length or DNS
+       payload.
+
+* HPFEEDS stats:
+     + A new stats tree has been added to the statistics menu. Now it
+       is possible to collect stats per channel (messages count and payload
+       size), and opcode distribution.
+
+* HTTP2 stats:
+     + A new stats tree has been added to the statistics menu. Now it
+       is possible to collect stats (type distribution).
+
+The following features are new (or have been significantly updated)
+since version 1.12.0:
+
+* The I/O Graph in the Gtk+ UI now supports an unlimited number of data points
+(up from 100k).
+* TShark now resets its state when changing files in ring-buffer mode.
+* Expert Info severities can now be configured.
+* Wireshark now supports external capture interfaces.  External capture
+interfaces can be anything from a tcpdump-over-ssh pipe to a program that
+captures from proprietary or non-standard hardware.  This functionality is not
+available in the Qt UI yet.
+
+* Qt port:
+
+** The Qt UI is now the default (program name is wireshark).
+** A Polish translation has been added.
+** The Interfaces dialog has been added.
+** The interface list is now updated when interfaces appear or disappear.
+** The Conversations and Endpoints dialogs have been added.
+** A Japanese translation has been added.
+** It is now possible to manage remote capture interfaces.
+** Windows: taskbar progress support has been added.
+** Most toolbar actions are in place and work.
+** More command line options are now supported
+
+//=== Removed Dissectors
+
+
+=== New Protocol Support
+
+--sort-and-group--
+Generic Network Virtualization Encapsulation (Geneve)
+IPMI Trace
+iSER
+OptoMMP
+corosync/totemnet  corosync cluster engine ( lowest levelencryption/decryption protocol)
+corosync/totemsrp corosync cluster engine ( totem single ring protocol)
+ceph
+GVSP GigE Vision (TM) Streaming Protocol
+HCrt
+Stateless Transport Tunneling
+CP ``Cooper'' 2179
+S7 Communication
+KNXnetIP
+Dynamic Source Routing (RFC 4728)
+MCPE (Minecraft Pocket Edition)
+RakNet games library
+(LISP) TCP Control Message
+Android ADB
+Android Logcat text
+Couchbase
+AllJoyn Reliable Datagram Protocol
+HiQnet
+Elasticsearch
+Shared Memory Communications - RDMA
+Remote Shared Virtual Disk - RSVD
+Riemann
+MACsec Key Agreement - EAPoL-MKA
+DJI UAV Drone Control Protocol
+ZVT Kassenschnittstelle
+ETSI Card Application Toolkit - Transport Protocol
+QNEX6 (QNET)
+Secure Socket Tunnel Protocol (SSTP)
+BGP Monitoring Prototol (BMP)
+Video Services over IP (VSIP)
+OCFS2
+--sort-and-group--
+
+=== Updated Protocol Support
+
+Too many protocols have been updated to list here.
+
+=== New and Updated Capture File Support
+
+--sort-and-group--
+Android Logcat text files
+Wireshark now supports nanosecond timestamp resolution in PCAP-NG files.
+Colasoft Capsa files
+--sort-and-group--
+
+=== Major API Changes
+
+The libwireshark API has undergone some major changes:
+
+* The emem framework (including all ep_ and se_ memory allocation routines) has
+been completely removed in favour of wmem which is now fully mature.
+* The (long-since-broken) Python bindings support has been removed.  If
+you want to write dissectors in something other than C, use Lua.
+
+
+== Getting Wireshark
+
+Wireshark source code and installation packages are available from
+https://www.wireshark.org/download.html.
+
+=== Vendor-supplied Packages
+
+Most Linux and Unix vendors supply their own Wireshark packages. You can
+usually install or upgrade Wireshark using the package management system
+specific to that platform. A list of third-party packages can be found
+on the https://www.wireshark.org/download.html#thirdparty[download page]
+on the Wireshark web site.
+
+== File Locations
+
+Wireshark and TShark look in several different locations for preference
+files, plugins, SNMP MIBS, and RADIUS dictionaries. These locations vary
+from platform to platform. You can use About→Folders to find the default
+locations on your system.
+
+== Known Problems
+
+Dumpcap might not quit if Wireshark or TShark crashes.
+(ws-buglink:1419[])
+
+The BER dissector might infinitely loop.
+(ws-buglink:1516[])
+
+Capture filters aren't applied when capturing from named pipes.
+(ws-buglink:1814[])
+
+Filtering tshark captures with read filters (-R) no longer works.
+(ws-buglink:2234[])
+
+Resolving (ws-buglink:9044[]) reopens (ws-buglink:3528[]) so that Wireshark
+no longer automatically decodes gzip data when following a TCP stream.
+
+Application crash when changing real-time option.
+(ws-buglink:4035[])
+
+Hex pane display issue after startup.
+(ws-buglink:4056[])
+
+Packet list rows are oversized.
+(ws-buglink:4357[])
+
+Wireshark and TShark will display incorrect delta times in some cases.
+(ws-buglink:4985[])
+
+The 64-bit version of Wireshark will leak memory on Windows when the display
+depth is set to 16 bits (ws-buglink:9914[])
+
+Wireshark should let you work with multiple capture files. (ws-buglink:10488[])
+
+== Getting Help
+
+Community support is available on https://ask.wireshark.org/[Wireshark's
+Q&A site] and on the wireshark-users mailing list. Subscription
+information and archives for all of Wireshark's mailing lists can be
+found on https://www.wireshark.org/lists/[the web site].
+
+Official Wireshark training and certification are available from
+http://www.wiresharktraining.com/[Wireshark University].
+
+== Frequently Asked Questions
+
+A complete FAQ is available on the
+https://www.wireshark.org/faq.html[Wireshark web site].
