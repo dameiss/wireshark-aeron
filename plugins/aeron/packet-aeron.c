@@ -902,6 +902,16 @@ static const value_string aeron_frame_type[] =
     { 0x0, NULL }
 };
 
+/* This is only needed when building the dissector as a plugin. When we finally included it in Wireshark,
+   this can be removed (and AERON_TFS_SET_NOTSET replaced with TFS(&tfs_set_notset)).
+*/
+#ifdef WS_BUILD_DLL
+#define AERON_TFS_SET_NOTSET TFS(&tfs_set_notset)
+#else
+static const true_false_string aeron_tfs_set_notset = { "Set", "Not set" };
+#define AERON_TFS_SET_NOTSET TFS(&aeron_tfs_set_notset)
+#endif
+
 /*----------------------------------------------------------------------------*/
 /* Preferences.                                                               */
 /*----------------------------------------------------------------------------*/
@@ -2347,9 +2357,9 @@ void proto_register_aeron(void)
         { &hf_aeron_data_flags,
             { "Flags", "aeron.data.flags", FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL } },
         { &hf_aeron_data_flags_b,
-            { "Begin Message", "aeron.data.flags.b", FT_BOOLEAN, 8, TFS(&tfs_set_notset), DATA_FLAGS_BEGIN, NULL, HFILL } },
+            { "Begin Message", "aeron.data.flags.b", FT_BOOLEAN, 8, AERON_TFS_SET_NOTSET, DATA_FLAGS_BEGIN, NULL, HFILL } },
         { &hf_aeron_data_flags_e,
-            { "End Message", "aeron.data.flags.e", FT_BOOLEAN, 8, TFS(&tfs_set_notset), DATA_FLAGS_END, NULL, HFILL } },
+            { "End Message", "aeron.data.flags.e", FT_BOOLEAN, 8, AERON_TFS_SET_NOTSET, DATA_FLAGS_END, NULL, HFILL } },
         { &hf_aeron_data_type,
             { "Type", "aeron.data.type", FT_UINT16, BASE_DEC_HEX, VALS(aeron_frame_type), 0x0, NULL, HFILL } },
         { &hf_aeron_data_frame_length,
@@ -2397,7 +2407,7 @@ void proto_register_aeron(void)
         { &hf_aeron_sm_flags,
             { "Flags", "aeron.sm.flags", FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL } },
         { &hf_aeron_sm_flags_s,
-            { "Setup", "aeron.sm.flags.s", FT_BOOLEAN, 8, TFS(&tfs_set_notset), STATUS_FLAGS_SETUP, NULL, HFILL } },
+            { "Setup", "aeron.sm.flags.s", FT_BOOLEAN, 8, AERON_TFS_SET_NOTSET, STATUS_FLAGS_SETUP, NULL, HFILL } },
         { &hf_aeron_sm_type,
             { "Type", "aeron.sm.type", FT_UINT16, BASE_DEC_HEX, VALS(aeron_frame_type), 0x0, NULL, HFILL } },
         { &hf_aeron_sm_frame_length,

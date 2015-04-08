@@ -384,7 +384,7 @@ PCAP_REMOTE=1
 #
 # If you don't have Zlib, comment this line out, so that ZLIB_DIR isn't
 # defined.
-ZLIB_DIR=$(WIRESHARK_LIB_DIR)\zlib-1.2.8
+#ZLIB_DIR=$(WIRESHARK_LIB_DIR)\zlib-1.2.8
 
 #
 # Optional: the ADNS library enables asynchronous (nonblocking) DNS
