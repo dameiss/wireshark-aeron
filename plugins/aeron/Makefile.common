@@ -22,7 +22,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 # the name of the plugin
-PLUGIN_NAME = ethercat
+PLUGIN_NAME = aeron
 
 # Non-generated sources to be scanned for registration routines
 NONGENERATED_REGISTER_C_FILES = \
