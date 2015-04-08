@@ -2,5 +2,5 @@
 # Add your custom plugins here
 CUSTOM_PLUGINS= \
 # Example:
-# 	../../plugins/foo/foo.dll 	
+ 	../../plugins/aeron/aeron.dll 	
 
