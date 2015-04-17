@@ -54,32 +54,8 @@ static int aeron_tap_handle = -1;
 */
 
 /*----------------------------------------------------------------------------*/
-/* Aeron transport management.                                                */
+/* Aeron position routines.                                                   */
 /*----------------------------------------------------------------------------*/
-
-static guint64 aeron_channel = 0;
-
-typedef struct
-{
-    address * addr1;
-    address * addr2;
-    port_type ptype;
-    guint16 port1;
-    guint16 port2;
-} aeron_conversation_info_t;
-
-struct aeron_transport_t_stct;
-typedef struct aeron_transport_t_stct aeron_transport_t;
-
-struct aeron_stream_t_stct;
-typedef struct aeron_stream_t_stct aeron_stream_t;
-
-struct aeron_term_t_stct;
-typedef struct aeron_term_t_stct aeron_term_t;
-
-struct aeron_fragment_t_stct;
-typedef struct aeron_fragment_t_stct aeron_fragment_t;
-
 typedef struct
 {
     guint32 term_id;
@@ -156,49 +132,10 @@ static void aeron_pos_add_length(aeron_pos_t * pos, guint32 length, guint32 term
     }
 }
 
-typedef struct
-{
-    guint32 frame;
-    guint32 previous_frame;
-    guint32 next_frame;
-    gboolean retransmission;
-} aeron_frame_t;
-
-struct aeron_fragment_t_stct
-{
-    aeron_term_t * term;                    /* Parent term */
-    wmem_tree_t * frame;                    /* Tree of all frames (aeron_frame_t) in which this fragment occurs, keyed by frame number */
-    aeron_frame_t * first_frame;
-    aeron_frame_t * last_frame;
-    guint32 offset;
-    guint32 length;
-    guint32 data_length;
-    guint32 frame_count;
-    gboolean is_data_frame;
-    gboolean is_begin_msg;
-    gboolean is_end_msg;
-};
-
-#if AERON_REASSEMBLY
-struct aeron_msg_t_stct;
-typedef struct aeron_msg_t_stct aeron_msg_t;
-
-struct aeron_msg_fragment_list_t_stct;
-typedef struct aeron_msg_fragment_list_t_stct aeron_msg_fragment_list_t;
-#endif
-
-struct aeron_term_t_stct
-{
-    aeron_stream_t * stream;                /* Parent stream */
-    wmem_tree_t * fragment;                 /* Tree of all fragments (aeron_fragment_t) in this term, keyed by term offset */
-    wmem_tree_t * frame;                    /* Tree of all frames (aeron_frame_t) in this term, keyed by frame number */
-#if AERON_REASSEMBLY
-    wmem_tree_t * message;                  /* Tree of all fragmented messages (aeron_msg_t) in this term, keyed by lowest term offset */
-    aeron_msg_fragment_list_t * orphan_fragment;
-#endif
-    aeron_frame_t * last_frame;             /* Pointer to last frame seen for this term */
-    guint32 term_id;
-};
+/*----------------------------------------------------------------------------*/
+/* Aeron frame information management.                                        */
+/*----------------------------------------------------------------------------*/
+static wmem_tree_t * aeron_frame_info_tree = NULL;
 
 typedef struct
 {
@@ -209,19 +146,131 @@ typedef struct
     aeron_pos_t completed;
     guint32 receiver_window;
     guint32 outstanding_bytes;
-} aeron_stream_frame_analysis_t;
-#define AERON_STREAM_FRAME_ANALYSIS_FLAGS_WINDOW_FULL      0x00000001
-#define AERON_STREAM_FRAME_ANALYSIS_FLAGS_IDLE_RX          0x00000002
-#define AERON_STREAM_FRAME_ANALYSIS_FLAGS_PACING_RX        0x00000004
-#define AERON_STREAM_FRAME_ANALYSIS_FLAGS_OOO              0x00000008
-#define AERON_STREAM_FRAME_ANALYSIS_FLAGS_OOO_GAP          0x00000010
-#define AERON_STREAM_FRAME_ANALYSIS_FLAGS_KEEPALIVE        0x00000020
-#define AERON_STREAM_FRAME_ANALYSIS_FLAGS_WINDOW_RESIZE    0x00000040
-#define AERON_STREAM_FRAME_ANALYSIS_FLAGS_OOO_SM           0x00000080
-#define AERON_STREAM_FRAME_ANALYSIS_FLAGS_KEEPALIVE_SM     0x00000100
-#define AERON_STREAM_FRAME_ANALYSIS_FLAGS_RX               0x00000200
+} aeron_stream_analysis_t;
+#define AERON_STREAM_ANALYSIS_FLAGS_WINDOW_FULL      0x00000001
+#define AERON_STREAM_ANALYSIS_FLAGS_IDLE_RX          0x00000002
+#define AERON_STREAM_ANALYSIS_FLAGS_PACING_RX        0x00000004
+#define AERON_STREAM_ANALYSIS_FLAGS_OOO              0x00000008
+#define AERON_STREAM_ANALYSIS_FLAGS_OOO_GAP          0x00000010
+#define AERON_STREAM_ANALYSIS_FLAGS_KEEPALIVE        0x00000020
+#define AERON_STREAM_ANALYSIS_FLAGS_WINDOW_RESIZE    0x00000040
+#define AERON_STREAM_ANALYSIS_FLAGS_OOO_SM           0x00000080
+#define AERON_STREAM_ANALYSIS_FLAGS_KEEPALIVE_SM     0x00000100
+#define AERON_STREAM_ANALYSIS_FLAGS_RX               0x00000200
+#define AERON_STREAM_ANALYSIS_FLAGS_TERM_ID_CHANGE   0x00000400
 
-#define AERON_STREAM_FRAME_ANALYSIS_FLAGS2_RCV_VALID       0x00000001
+#define AERON_STREAM_ANALYSIS_FLAGS2_RCV_VALID       0x00000001
+
+typedef struct
+{
+    guint32 previous;
+    guint32 next;
+} aeron_frame_link_t;
+
+typedef struct
+{
+    guint32 frame;
+    guint32 ofs;
+    aeron_frame_link_t transport;
+    aeron_frame_link_t stream;
+    aeron_frame_link_t term;
+    aeron_frame_link_t fragment;
+    aeron_stream_analysis_t * analysis;
+    guint32 flags;
+} aeron_frame_info_t;
+#define AERON_FRAME_INFO_FLAGS_RETRANSMISSION 0x00000001
+#define AERON_FRAME_INFO_FLAGS_KEEPALIVE      0x00000002
+
+static wmem_tree_key_t * aeron_frame_info_key_build(guint32 frame, guint32 ofs)
+{
+    wmem_tree_key_t * fkey;
+    guint32 * key;
+
+    fkey = wmem_alloc_array(wmem_packet_scope(), wmem_tree_key_t, 2);
+    key = wmem_alloc_array(wmem_packet_scope(), guint32, 2);
+    key[0] = frame;
+    key[1] = ofs;
+    fkey[0].length = 2;
+    fkey[0].key = key;
+    fkey[1].length = 0;
+    fkey[1].key = NULL;
+    return (fkey);
+}
+
+static aeron_frame_info_t * aeron_frame_info_lookup(wmem_tree_key_t * key)
+{
+    aeron_frame_info_t * fi = NULL;
+
+    fi = (aeron_frame_info_t *) wmem_tree_lookup32_array(aeron_frame_info_tree, key);
+    return (fi);
+}
+
+static aeron_frame_info_t * aeron_frame_info_add(guint32 frame, guint32 ofs)
+{
+    aeron_frame_info_t * fi = NULL;
+    wmem_tree_key_t * key = aeron_frame_info_key_build(frame, ofs);
+
+    fi = aeron_frame_info_lookup(key);
+    if (fi == NULL)
+    {
+        fi = wmem_new0(wmem_file_scope(), aeron_frame_info_t);
+        fi->frame = frame;
+        fi->ofs = ofs;
+        wmem_tree_insert32_array(aeron_frame_info_tree, key, (void *) fi);
+    }
+    return (fi);
+}
+
+/*----------------------------------------------------------------------------*/
+/* Aeron channel management.                                                  */
+/*----------------------------------------------------------------------------*/
+static guint64 aeron_channel = 1;
+
+static guint64 aeron_channel_assign(void)
+{
+    return (aeron_channel++);
+}
+
+static void aeron_channel_init(void)
+{
+    aeron_channel = 1;
+}
+
+/*----------------------------------------------------------------------------*/
+/* Aeron transport, stream, term, and fragment structures.                    */
+/*----------------------------------------------------------------------------*/
+typedef struct
+{
+    address * addr1;
+    address * addr2;
+    port_type ptype;
+    guint16 port1;
+    guint16 port2;
+} aeron_conversation_info_t;
+
+struct aeron_transport_t_stct;
+typedef struct aeron_transport_t_stct aeron_transport_t;
+
+struct aeron_stream_t_stct;
+typedef struct aeron_stream_t_stct aeron_stream_t;
+
+struct aeron_term_t_stct;
+typedef struct aeron_term_t_stct aeron_term_t;
+
+struct aeron_fragment_t_stct;
+typedef struct aeron_fragment_t_stct aeron_fragment_t;
+
+struct aeron_transport_t_stct
+{
+    guint64 channel;
+    wmem_tree_t * stream;                   /* Tree of all streams (aeron_stream_t) in this transport, keyed by stream ID */
+    aeron_frame_info_t * last_frame;
+    address addr1;
+    address addr2;
+    guint32 session_id;
+    guint16 port1;
+    guint16 port2;
+};
 
 struct aeron_stream_rcv_t_stct;
 typedef struct aeron_stream_rcv_t_stct aeron_stream_rcv_t;
@@ -240,11 +289,10 @@ struct aeron_stream_t_stct
 {
     aeron_transport_t * transport;          /* Parent transport */
     wmem_tree_t * term;                     /* Tree of all terms (aeron_term_t) in this stream, keyed by term ID */
-    wmem_tree_t * frame;                    /* Tree of all frames (aeron_frame_t) in this term, keyed by frame number */
     wmem_tree_t * analysis;                 /* Tree of analysis items (aeron_stream_frame_analysis_t) in this stream, keyed by frame number */
     aeron_stream_rcv_t * rcv;               /* List of receivers */
     guint32 rcv_count;
-    aeron_frame_t * last_frame;
+    aeron_frame_info_t * last_frame;
     guint32 stream_id;
     guint32 term_length;
     guint32 mtu;
@@ -254,24 +302,342 @@ struct aeron_stream_t_stct
 };
 #define AERON_STREAM_FLAGS_HIGH_VALID 0x1
 
-struct aeron_transport_t_stct
+#if AERON_REASSEMBLY
+struct aeron_msg_t_stct;
+typedef struct aeron_msg_t_stct aeron_msg_t;
+
+struct aeron_msg_fragment_list_t_stct;
+typedef struct aeron_msg_fragment_list_t_stct aeron_msg_fragment_list_t;
+#endif
+
+struct aeron_term_t_stct
 {
-    guint64 channel;
-    wmem_tree_t * stream;                   /* Tree of all streams (aeron_stream_t) in this transport, keyed by stream ID */
-    wmem_tree_t * frame;                    /* Tree of all frames (aeron_frame_t) in this transport, keyed by frame number */
-    aeron_frame_t * last_frame;
-    address addr1;
-    address addr2;
-    guint32 session_id;
-    guint16 port1;
-    guint16 port2;
+    aeron_stream_t * stream;                /* Parent stream */
+    wmem_tree_t * fragment;                 /* Tree of all fragments (aeron_fragment_t) in this term, keyed by term offset */
+#if AERON_REASSEMBLY
+    wmem_tree_t * message;                  /* Tree of all fragmented messages (aeron_msg_t) in this term, keyed by lowest term offset */
+    aeron_msg_fragment_list_t * orphan_fragment;
+#endif
+    aeron_frame_info_t * last_frame;             /* Pointer to last frame seen for this term */
+    guint32 term_id;
 };
 
-static guint64 aeron_channel_assign(void)
+struct aeron_fragment_t_stct
 {
-    return (aeron_channel++);
+    aeron_term_t * term;                    /* Parent term */
+    wmem_list_t * frame;                    /* List of frames (aeron_frame_info_t) containing this fragment */
+    aeron_frame_info_t * first_frame;
+    aeron_frame_info_t * last_frame;
+    aeron_frame_info_t * first_data_frame;
+    guint32 offset;
+    guint32 length;
+    guint32 data_length;
+    guint32 frame_count;
+    gboolean is_data_frame;
+    gboolean is_begin_msg;
+    gboolean is_end_msg;
+};
+
+/*----------------------------------------------------------------------------*/
+/* Aeron transport management.                                                */
+/*----------------------------------------------------------------------------*/
+static aeron_transport_t * aeron_transport_add(const aeron_conversation_info_t * cinfo, guint32 session_id, guint32 frame)
+{
+    aeron_transport_t * transport;
+    conversation_t * conv = NULL;
+    wmem_tree_t * session_tree = NULL;
+
+    conv = find_conversation(frame, cinfo->addr1, cinfo->addr2, cinfo->ptype, cinfo->port1, cinfo->port2, 0);
+    if (conv == NULL)
+    {
+        conv = conversation_new(frame, cinfo->addr1, cinfo->addr2, cinfo->ptype, cinfo->port1, cinfo->port2, 0);
+    }
+    if (frame > conv->last_frame)
+    {
+        conv->last_frame = frame;
+    }
+    session_tree = (wmem_tree_t *) conversation_get_proto_data(conv, proto_aeron);
+    if (session_tree == NULL)
+    {
+        session_tree = wmem_tree_new(wmem_file_scope());
+        conversation_add_proto_data(conv, proto_aeron, (void *) session_tree);
+    }
+    transport = (aeron_transport_t *) wmem_tree_lookup32(session_tree, session_id);
+    if (transport != NULL)
+    {
+        return (transport);
+    }
+    transport = wmem_new0(wmem_file_scope(), aeron_transport_t);
+    transport->channel = aeron_channel_assign();
+    transport->stream = wmem_tree_new(wmem_file_scope());
+    transport->last_frame = NULL;
+    WMEM_COPY_ADDRESS(wmem_file_scope(), &(transport->addr1), cinfo->addr1);
+    WMEM_COPY_ADDRESS(wmem_file_scope(), &(transport->addr2), cinfo->addr2);
+    transport->session_id = session_id;
+    transport->port1 = cinfo->port1;
+    transport->port2 = cinfo->port2;
+    wmem_tree_insert32(session_tree, session_id, (void *) transport);
+    return (transport);
 }
 
+static aeron_stream_t * aeron_transport_stream_find(aeron_transport_t * transport, guint32 stream_id)
+{
+    aeron_stream_t * stream = NULL;
+
+    stream = (aeron_stream_t *) wmem_tree_lookup32(transport->stream, stream_id);
+    return (stream);
+}
+
+static aeron_stream_t * aeron_transport_stream_add(aeron_transport_t * transport, guint32 stream_id)
+{
+    aeron_stream_t * stream = NULL;
+
+    stream = aeron_transport_stream_find(transport, stream_id);
+    if (stream == NULL)
+    {
+        stream = wmem_new0(wmem_file_scope(), aeron_stream_t);
+        stream->transport = transport;
+        stream->term = wmem_tree_new(wmem_file_scope());
+        stream->rcv = NULL;
+        stream->rcv_count = 0;
+        stream->last_frame = NULL;
+        stream->stream_id = stream_id;
+        stream->term_length = 0;
+        stream->mtu = 0;
+        stream->fragment_stride = 0;
+        stream->flags = 0;
+        stream->high.term_id = 0;
+        stream->high.term_offset = 0;
+        wmem_tree_insert32(transport->stream, stream_id, (void *) stream);
+    }
+    return (stream);
+}
+
+static void aeron_transport_frame_add(aeron_transport_t * transport, aeron_frame_info_t * finfo, guint32 flags)
+{
+    if (flags != 0)
+    {
+        finfo->flags = flags;
+    }
+    if (transport->last_frame != NULL)
+    {
+        finfo->transport.previous = transport->last_frame->frame;
+        transport->last_frame->transport.next = finfo->frame;
+    }
+    finfo->transport.next = 0;
+    transport->last_frame = finfo;
+}
+
+/*----------------------------------------------------------------------------*/
+/* Aeron stream management.                                                   */
+/*----------------------------------------------------------------------------*/
+static aeron_term_t * aeron_stream_term_find(aeron_stream_t * stream, guint32 term_id)
+{
+    aeron_term_t * term = NULL;
+
+    term = (aeron_term_t *) wmem_tree_lookup32(stream->term, term_id);
+    return (term);
+}
+
+static aeron_term_t * aeron_stream_term_add(aeron_stream_t * stream, guint32 term_id)
+{
+    aeron_term_t * term = NULL;
+
+    term = aeron_stream_term_find(stream, term_id);
+    if (term == NULL)
+    {
+        term = wmem_new0(wmem_file_scope(), aeron_term_t);
+        term->stream = stream;
+        term->fragment = wmem_tree_new(wmem_file_scope());
+#if AERON_REASSEMBLY
+        term->message = wmem_tree_new(wmem_file_scope());
+#endif
+        term->last_frame = NULL;
+        term->term_id = term_id;
+        wmem_tree_insert32(stream->term, term_id, (void *) term);
+    }
+    return (term);
+}
+
+static aeron_stream_rcv_t * aeron_stream_rcv_find_le(aeron_stream_t * stream, const address * addr, guint16 port)
+{
+    aeron_stream_rcv_t * cur = stream->rcv;
+
+    while (cur != NULL)
+    {
+        int rc = cmp_address(&(cur->addr), addr);
+        if (rc == 0)
+        {
+            if (cur->port == port)
+            {
+                break;
+            }
+            else if (cur->port > port)
+            {
+                cur = cur->prev;
+                break;
+            }
+        }
+        else if (rc > 0)
+        {
+            cur = cur->prev;
+            break;
+        }
+        cur = cur->next;
+    }
+    return (cur);
+}
+
+static aeron_stream_rcv_t * aeron_stream_rcv_find(aeron_stream_t * stream, const address * addr, guint16 port)
+{
+    aeron_stream_rcv_t * cur = aeron_stream_rcv_find_le(stream, addr, port);
+    if (cur != NULL)
+    {
+        if ((cmp_address(&(cur->addr), addr) != 0) || (cur->port != port))
+        {
+            cur = NULL;
+        }
+    }
+    return (cur);
+}
+
+static aeron_stream_rcv_t * aeron_stream_rcv_add(aeron_stream_t * stream, const address * addr, guint16 port)
+{
+    aeron_stream_rcv_t * rcv = NULL;
+    aeron_stream_rcv_t * cur = NULL;
+
+    cur = aeron_stream_rcv_find(stream, addr, port);
+    if (cur != NULL)
+    {
+        return (cur);
+    }
+    cur = aeron_stream_rcv_find_le(stream, addr, port);
+    /* Add after cur */
+    rcv = wmem_new0(wmem_file_scope(), aeron_stream_rcv_t);
+    rcv->prev = cur;
+    if (cur == NULL)
+    {
+        stream->rcv = rcv;
+        rcv->next = NULL;
+    }
+    else
+    {
+        rcv->next = cur->next;
+        cur->next = rcv;
+        if (cur->next != NULL)
+        {
+            cur->next->prev = rcv;
+        }
+    }
+    WMEM_COPY_ADDRESS(wmem_file_scope(), &(rcv->addr), addr);
+    rcv->port = port;
+    rcv->completed.term_id = 0;
+    rcv->completed.term_offset = 0;
+    rcv->receiver_window = 0;
+    stream->rcv_count++;
+    return (rcv);
+}
+
+static void aeron_stream_frame_add(aeron_stream_t * stream, aeron_frame_info_t * finfo, guint32 flags)
+{
+    if (flags != 0)
+    {
+        finfo->flags = flags;
+    }
+    if (stream->last_frame != NULL)
+    {
+        finfo->stream.previous = stream->last_frame->frame;
+        stream->last_frame->stream.next = finfo->frame;
+    }
+    finfo->stream.next = 0;
+    stream->last_frame = finfo;
+    aeron_transport_frame_add(stream->transport, finfo, 0);
+}
+
+/*----------------------------------------------------------------------------*/
+/* Aeron term management.                                                     */
+/*----------------------------------------------------------------------------*/
+static aeron_fragment_t * aeron_term_fragment_find(aeron_term_t * term, guint32 offset)
+{
+    aeron_fragment_t * fragment = NULL;
+
+    fragment = (aeron_fragment_t *) wmem_tree_lookup32(term->fragment, offset);
+    return (fragment);
+}
+
+static aeron_fragment_t * aeron_term_fragment_add(aeron_term_t * term, guint32 offset, guint32 length, guint32 data_length)
+{
+    aeron_fragment_t * fragment = NULL;
+
+    fragment = (aeron_fragment_t *) wmem_tree_lookup32(term->fragment, offset);
+    if (fragment == NULL)
+    {
+        fragment = wmem_new0(wmem_file_scope(), aeron_fragment_t);
+        fragment->term = term;
+        fragment->frame = wmem_list_new(wmem_file_scope());
+        fragment->first_frame = NULL;
+        fragment->last_frame = NULL;
+        fragment->first_data_frame = NULL;
+        fragment->offset = offset;
+        fragment->length = length;
+        fragment->data_length = data_length;
+        fragment->frame_count = 0;
+        wmem_tree_insert32(term->fragment, offset, (void *) fragment);
+    }
+    return (fragment);
+}
+
+static void aeron_term_frame_add(aeron_term_t * term, aeron_frame_info_t * finfo, guint32 flags)
+{
+    if (flags != 0)
+    {
+        finfo->flags = flags;
+    }
+    if (term->last_frame != NULL)
+    {
+        finfo->term.previous = term->last_frame->frame;
+        term->last_frame->term.next = finfo->frame;
+    }
+    finfo->term.next = 0;
+    term->last_frame = finfo;
+    aeron_stream_frame_add(term->stream, finfo, 0);
+}
+
+/*----------------------------------------------------------------------------*/
+/* Aeron fragment management.                                                 */
+/*----------------------------------------------------------------------------*/
+static void aeron_fragment_frame_add(aeron_fragment_t * fragment, aeron_frame_info_t * finfo, guint32 flags, guint32 length)
+{
+    if (flags != 0)
+    {
+        finfo->flags = flags;
+    }
+    wmem_list_append(fragment->frame, (void *) finfo);
+    fragment->frame_count++;
+    if (fragment->last_frame != NULL)
+    {
+        finfo->fragment.previous = fragment->last_frame->frame;
+        fragment->last_frame->fragment.next = finfo->frame;
+    }
+    if (fragment->first_frame == NULL)
+    {
+        fragment->first_frame = finfo;
+    }
+    if (length != 0)
+    {
+        if (fragment->first_data_frame == NULL)
+        {
+            fragment->first_data_frame = finfo;
+        }
+    }
+    finfo->fragment.next = 0;
+    fragment->last_frame = finfo;
+    aeron_term_frame_add(fragment->term, finfo, 0);
+}
+
+/*----------------------------------------------------------------------------*/
+/* Utilioty functions.                                                        */
+/*----------------------------------------------------------------------------*/
 static gboolean aeron_is_address_multicast(const address * addr)
 {
     guint8 * addr_data = (guint8 *) addr->data;
@@ -340,371 +706,6 @@ static char * aeron_format_transport_uri(const aeron_conversation_info_t * cinfo
     return (wmem_strbuf_finalize(uri));
 }
 
-static aeron_transport_t * aeron_transport_add(const aeron_conversation_info_t * cinfo, guint32 session_id, guint32 frame)
-{
-    aeron_transport_t * transport;
-    conversation_t * conv = NULL;
-    wmem_tree_t * session_tree = NULL;
-
-    conv = find_conversation(frame, cinfo->addr1, cinfo->addr2, cinfo->ptype, cinfo->port1, cinfo->port2, 0);
-    if (conv == NULL)
-    {
-        conv = conversation_new(frame, cinfo->addr1, cinfo->addr2, cinfo->ptype, cinfo->port1, cinfo->port2, 0);
-    }
-    if (frame > conv->last_frame)
-    {
-        conv->last_frame = frame;
-    }
-    session_tree = (wmem_tree_t *) conversation_get_proto_data(conv, proto_aeron);
-    if (session_tree == NULL)
-    {
-        session_tree = wmem_tree_new(wmem_file_scope());
-        conversation_add_proto_data(conv, proto_aeron, (void *) session_tree);
-    }
-    transport = (aeron_transport_t *) wmem_tree_lookup32(session_tree, session_id);
-    if (transport != NULL)
-    {
-        return (transport);
-    }
-    transport = wmem_new(wmem_file_scope(), aeron_transport_t);
-    transport->channel = aeron_channel_assign();
-    transport->stream = wmem_tree_new(wmem_file_scope());
-    transport->frame = wmem_tree_new(wmem_file_scope());
-    transport->last_frame = NULL;
-    WMEM_COPY_ADDRESS(wmem_file_scope(), &(transport->addr1), cinfo->addr1);
-    WMEM_COPY_ADDRESS(wmem_file_scope(), &(transport->addr2), cinfo->addr2);
-    transport->session_id = session_id;
-    transport->port1 = cinfo->port1;
-    transport->port2 = cinfo->port2;
-    wmem_tree_insert32(session_tree, session_id, (void *) transport);
-    return (transport);
-}
-
-static aeron_stream_t * aeron_transport_stream_find(aeron_transport_t * transport, guint32 stream_id)
-{
-    aeron_stream_t * stream = NULL;
-
-    stream = (aeron_stream_t *) wmem_tree_lookup32(transport->stream, stream_id);
-    return (stream);
-}
-
-static aeron_stream_t * aeron_transport_stream_add(aeron_transport_t * transport, guint32 stream_id)
-{
-    aeron_stream_t * stream = NULL;
-
-    stream = aeron_transport_stream_find(transport, stream_id);
-    if (stream == NULL)
-    {
-        stream = wmem_new(wmem_file_scope(), aeron_stream_t);
-        stream->transport = transport;
-        stream->term = wmem_tree_new(wmem_file_scope());
-        stream->frame = wmem_tree_new(wmem_file_scope());
-        stream->analysis = wmem_tree_new(wmem_file_scope());
-        stream->rcv = NULL;
-        stream->rcv_count = 0;
-        stream->last_frame = NULL;
-        stream->stream_id = stream_id;
-        stream->term_length = 0;
-        stream->mtu = 0;
-        stream->fragment_stride = 0;
-        stream->flags = 0;
-        stream->high.term_id = 0;
-        stream->high.term_offset = 0;
-        wmem_tree_insert32(transport->stream, stream_id, (void *) stream);
-    }
-    return (stream);
-}
-
-static aeron_stream_frame_analysis_t * aeron_stream_frame_analysis_find(aeron_stream_t * stream, guint32 frame)
-{
-    return ((aeron_stream_frame_analysis_t *) wmem_tree_lookup32(stream->analysis, frame));
-}
-
-static aeron_stream_frame_analysis_t * aeron_stream_frame_analysis_add(aeron_stream_t * stream, guint32 frame)
-{
-    aeron_stream_frame_analysis_t * sfa = NULL;
-
-    sfa = aeron_stream_frame_analysis_find(stream, frame);
-    if (sfa != NULL)
-    {
-        return (sfa);
-    }
-    sfa = wmem_new(wmem_file_scope(), aeron_stream_frame_analysis_t);
-    sfa->flags = 0;
-    sfa->flags2 = 0;
-    sfa->frame = frame;
-    sfa->high.term_id = 0;
-    sfa->high.term_offset = 0;
-    sfa->completed.term_id = 0;
-    sfa->completed.term_offset = 0;
-    sfa->receiver_window = 0;
-    sfa->outstanding_bytes = 0;
-    wmem_tree_insert32(stream->analysis, frame, (void *) sfa);
-    return (sfa);
-}
-
-static aeron_term_t * aeron_stream_term_find(aeron_stream_t * stream, guint32 term_id)
-{
-    aeron_term_t * term = NULL;
-
-    term = (aeron_term_t *) wmem_tree_lookup32(stream->term, term_id);
-    return (term);
-}
-
-static aeron_term_t * aeron_stream_term_add(aeron_stream_t * stream, guint32 term_id)
-{
-    aeron_term_t * term = NULL;
-
-    term = aeron_stream_term_find(stream, term_id);
-    if (term == NULL)
-    {
-        term = wmem_new(wmem_file_scope(), aeron_term_t);
-        term->stream = stream;
-        term->fragment = wmem_tree_new(wmem_file_scope());
-        term->frame = wmem_tree_new(wmem_file_scope());
-#if AERON_REASSEMBLY
-        term->message = wmem_tree_new(wmem_file_scope());
-#endif
-        term->last_frame = NULL;
-        term->term_id = term_id;
-        wmem_tree_insert32(stream->term, term_id, (void *) term);
-    }
-    return (term);
-}
-
-static aeron_stream_rcv_t * aeron_stream_rcv_find_le(aeron_stream_t * stream, const address * addr, guint16 port)
-{
-    aeron_stream_rcv_t * cur = stream->rcv;
-
-    while (cur != NULL)
-    {
-        int rc = cmp_address(&(cur->addr), addr);
-        if (rc == 0)
-        {
-            if (cur->port == port)
-            {
-                break;
-            }
-            else if (cur->port > port)
-            {
-                cur = cur->prev;
-                break;
-            }
-        }
-        else if (rc > 0)
-        {
-            cur = cur->prev;
-            break;
-        }
-        cur = cur->next;
-    }
-    return (cur);
-}
-
-static aeron_stream_rcv_t * aeron_stream_rcv_find(aeron_stream_t * stream, const address * addr, guint16 port)
-{
-    aeron_stream_rcv_t * cur = aeron_stream_rcv_find_le(stream, addr, port);
-    if (cur != NULL)
-    {
-        if ((cmp_address(&(cur->addr), addr) != 0) || (cur->port != port))
-        {
-            cur = NULL;
-        }
-    }
-    return (cur);
-}
-
-static aeron_stream_rcv_t * aeron_stream_rcv_add(aeron_stream_t * stream, const address * addr, guint16 port)
-{
-    aeron_stream_rcv_t * rcv = NULL;
-    aeron_stream_rcv_t * cur = NULL;
-
-    cur = aeron_stream_rcv_find(stream, addr, port);
-    if (cur != NULL)
-    {
-        return (cur);
-    }
-    cur = aeron_stream_rcv_find_le(stream, addr, port);
-    /* Add after cur */
-    rcv = wmem_new(wmem_file_scope(), aeron_stream_rcv_t);
-    rcv->prev = cur;
-    if (cur == NULL)
-    {
-        stream->rcv = rcv;
-        rcv->next = NULL;
-    }
-    else
-    {
-        rcv->next = cur->next;
-        cur->next = rcv;
-        if (cur->next != NULL)
-        {
-            cur->next->prev = rcv;
-        }
-    }
-    WMEM_COPY_ADDRESS(wmem_file_scope(), &(rcv->addr), addr);
-    rcv->port = port;
-    rcv->completed.term_id = 0;
-    rcv->completed.term_offset = 0;
-    rcv->receiver_window = 0;
-    stream->rcv_count++;
-    return (rcv);
-}
-
-static aeron_fragment_t * aeron_term_fragment_find(aeron_term_t * term, guint32 offset)
-{
-    aeron_fragment_t * fragment = NULL;
-
-    fragment = (aeron_fragment_t *) wmem_tree_lookup32(term->fragment, offset);
-    return (fragment);
-}
-
-static aeron_fragment_t * aeron_term_fragment_add(aeron_term_t * term, guint32 offset, guint32 length, guint32 data_length)
-{
-    aeron_fragment_t * fragment = NULL;
-
-    fragment = (aeron_fragment_t *) wmem_tree_lookup32(term->fragment, offset);
-    if (fragment == NULL)
-    {
-        fragment = wmem_new(wmem_file_scope(), aeron_fragment_t);
-        memset((void *) fragment, 0, sizeof(aeron_fragment_t));
-        fragment->term = term;
-        fragment->frame = wmem_tree_new(wmem_file_scope());
-        fragment->first_frame = NULL;
-        fragment->last_frame = NULL;
-        fragment->offset = offset;
-        fragment->length = length;
-        fragment->data_length = data_length;
-        fragment->frame_count = 0;
-        wmem_tree_insert32(term->fragment, offset, (void *) fragment);
-    }
-    return (fragment);
-}
-
-static void aeron_transport_frame_add(aeron_transport_t * transport, guint32 frame)
-{
-    aeron_frame_t * entry;
-
-    entry = wmem_new(wmem_file_scope(), aeron_frame_t);
-    memset((void *) entry, 0, sizeof(aeron_frame_t));
-    entry->frame = frame;
-    if (transport->last_frame != NULL)
-    {
-        entry->previous_frame = transport->last_frame->frame;
-        transport->last_frame->next_frame = frame;
-    }
-    else
-    {
-        entry->previous_frame = 0;
-    }
-    entry->next_frame = 0;
-    entry->retransmission = FALSE;
-    transport->last_frame = entry;
-    wmem_tree_insert32(transport->frame, frame, (void *) entry);
-}
-
-static aeron_frame_t * aeron_transport_frame_find(aeron_transport_t * transport, guint32 frame)
-{
-    return ((aeron_frame_t *) wmem_tree_lookup32(transport->frame, frame));
-}
-
-static void aeron_stream_frame_add(aeron_stream_t * stream, guint32 frame)
-{
-    aeron_frame_t * entry;
-
-    entry = wmem_new(wmem_file_scope(), aeron_frame_t);
-    memset((void *) entry, 0, sizeof(aeron_frame_t));
-    entry->frame = frame;
-    if (stream->last_frame != NULL)
-    {
-        entry->previous_frame = stream->last_frame->frame;
-        stream->last_frame->next_frame = frame;
-    }
-    else
-    {
-        entry->previous_frame = 0;
-    }
-    entry->next_frame = 0;
-    entry->retransmission = FALSE;
-    stream->last_frame = entry;
-    wmem_tree_insert32(stream->frame, frame, (void *) entry);
-    aeron_transport_frame_add(stream->transport, frame);
-}
-
-static aeron_frame_t * aeron_stream_frame_find(aeron_stream_t * stream, guint32 frame)
-{
-    return ((aeron_frame_t *) wmem_tree_lookup32(stream->frame, frame));
-}
-
-static void aeron_term_frame_add(aeron_term_t * term, guint32 frame)
-{
-    aeron_frame_t * entry;
-
-    entry = wmem_new(wmem_file_scope(), aeron_frame_t);
-    memset((void *) entry, 0, sizeof(aeron_frame_t));
-    entry->frame = frame;
-    if (term->last_frame != NULL)
-    {
-        entry->previous_frame = term->last_frame->frame;
-        term->last_frame->next_frame = frame;
-    }
-    else
-    {
-        entry->previous_frame = 0;
-    }
-    entry->next_frame = 0;
-    entry->retransmission = FALSE;
-    term->last_frame = entry;
-    wmem_tree_insert32(term->frame, frame, (void *) entry);
-    aeron_stream_frame_add(term->stream, frame);
-}
-
-static aeron_frame_t * aeron_term_frame_find(aeron_term_t * term, guint32 frame)
-{
-    return ((aeron_frame_t *) wmem_tree_lookup32(term->frame, frame));
-}
-
-static aeron_frame_t * aeron_fragment_frame_find(aeron_fragment_t * fragment, guint32 frame)
-{
-    aeron_frame_t * entry = NULL;
-
-    entry = (aeron_frame_t *) wmem_tree_lookup32(fragment->frame, frame);
-    return (entry);
-}
-
-static aeron_frame_t * aeron_fragment_frame_add(aeron_fragment_t * fragment, guint32 frame)
-{
-    aeron_frame_t * entry = NULL;
-
-    entry = aeron_fragment_frame_find(fragment, frame);
-    if (entry == NULL)
-    {
-        entry = wmem_new(wmem_file_scope(), aeron_frame_t);
-        memset((void *) entry, 0, sizeof(aeron_frame_t));
-        entry->frame = frame;
-        if (fragment->first_frame == NULL)
-        {
-            fragment->first_frame = entry;
-        }
-        if (fragment->last_frame == NULL)
-        {
-            entry->previous_frame = 0;
-            entry->retransmission = FALSE;
-        }
-        else
-        {
-            entry->previous_frame = fragment->last_frame->frame;
-            entry->retransmission = TRUE;
-        }
-        entry->next_frame = 0;
-        fragment->last_frame = entry;
-        wmem_tree_insert32(fragment->frame, frame, (void *) entry);
-        aeron_term_frame_add(fragment->term, frame);
-        fragment->frame_count++;
-    }
-    return (entry);
-}
-
 /*----------------------------------------------------------------------------*/
 /* Payload reassembly.                                                        */
 /*----------------------------------------------------------------------------*/
@@ -748,7 +749,7 @@ static aeron_msg_fragment_t * aeron_msg_fragment_create(tvbuff_t * tvb, int offs
 {
     aeron_msg_fragment_t * frag = NULL;
 
-    frag = wmem_new(wmem_file_scope(), aeron_msg_fragment_t);
+    frag = wmem_new0(wmem_file_scope(), aeron_msg_fragment_t);
     frag->prev = NULL;
     frag->next = NULL;
     frag->term_offset = term_offset;
@@ -770,7 +771,7 @@ static aeron_msg_fragment_t * aeron_msg_fragment_add(aeron_msg_t * message, tvbu
     }
     if (message->fragment == NULL)
     {
-        frag = wmem_new(wmem_file_scope(), aeron_msg_fragment_t);
+        frag = wmem_new0(wmem_file_scope(), aeron_msg_fragment_t);
         frag->prev = NULL;
         frag->next = NULL;
         message->fragment = frag;
@@ -799,7 +800,7 @@ static aeron_msg_fragment_t * aeron_msg_fragment_add(aeron_msg_t * message, tvbu
             }
             cur = cur->next;
         }
-        frag = wmem_new(wmem_file_scope(), aeron_msg_fragment_t);
+        frag = wmem_new0(wmem_file_scope(), aeron_msg_fragment_t);
         if (cur == NULL)
         {
             frag->prev = NULL;
@@ -844,7 +845,7 @@ static aeron_msg_t * aeron_term_msg_add(aeron_term_t * term, tvbuff_t * tvb, pac
     {
         return (pos);
     }
-    msg = wmem_new(wmem_file_scope(), aeron_msg_t);
+    msg = wmem_new0(wmem_file_scope(), aeron_msg_t);
     if (cur == NULL)
     {
         /* Goes at the head of the list */
@@ -996,7 +997,7 @@ static const value_string aeron_frame_type[] =
     { 0x0, NULL }
 };
 
-/* This is only needed when building the dissector as a plugin. When we finally included it in Wireshark,
+/* TODO: This is only needed when building the dissector as a plugin. When we finally included it in Wireshark,
    this can be removed (and AERON_TFS_SET_NOTSET replaced with TFS(&tfs_set_notset)).
 */
 #ifdef WS_BUILD_DLL
@@ -1045,8 +1046,7 @@ static aeron_conversation_info_t * aeron_setup_conversation_info(const packet_in
     aeron_conversation_info_t * cinfo;
     int addr_len = pinfo->dst.len;
 
-    cinfo = wmem_new(wmem_packet_scope(), aeron_conversation_info_t);
-    memset((void *) cinfo, 0, sizeof(aeron_conversation_info_t));
+    cinfo = wmem_new0(wmem_packet_scope(), aeron_conversation_info_t);
     cinfo->ptype = pinfo->ptype;
     switch (pinfo->dst.type)
     {
@@ -1054,8 +1054,8 @@ static aeron_conversation_info_t * aeron_setup_conversation_info(const packet_in
             {
                 guint8 * dst_addr = (guint8 *) pinfo->dst.data;
 
-                cinfo->addr1 = wmem_new(wmem_packet_scope(), address);
-                cinfo->addr2 = wmem_new(wmem_packet_scope(), address);
+                cinfo->addr1 = wmem_new0(wmem_packet_scope(), address);
+                cinfo->addr2 = wmem_new0(wmem_packet_scope(), address);
                 if (aeron_is_address_multicast(&(pinfo->dst)))
                 {
                     guint8 * addr1 = NULL;
@@ -1111,8 +1111,8 @@ static aeron_conversation_info_t * aeron_setup_conversation_info(const packet_in
             {
                 guint8 * dst_addr = (guint8 *) pinfo->dst.data;
 
-                cinfo->addr1 = wmem_new(wmem_packet_scope(), address);
-                cinfo->addr2 = wmem_new(wmem_packet_scope(), address);
+                cinfo->addr1 = wmem_new0(wmem_packet_scope(), address);
+                cinfo->addr2 = wmem_new0(wmem_packet_scope(), address);
                 if (aeron_is_address_multicast(&(pinfo->dst)))
                 {
                     guint8 * addr1 = NULL;
@@ -1267,6 +1267,7 @@ static int hf_aeron_sequence_analysis_term_next_frame = -1;
 static int hf_aeron_sequence_analysis_term_offset = -1;
 static int hf_aeron_sequence_analysis_term_offset_frame = -1;
 static int hf_aeron_sequence_analysis_retransmission = -1;
+static int hf_aeron_sequence_analysis_keepalive = -1;
 static int hf_aeron_stream_analysis = -1;
 static int hf_aeron_stream_analysis_high_term_id = -1;
 static int hf_aeron_stream_analysis_high_term_offset = -1;
@@ -1286,6 +1287,7 @@ static expert_field ei_aeron_analysis_ooo_sm = EI_INIT;
 static expert_field ei_aeron_analysis_keepalive_sm = EI_INIT;
 static expert_field ei_aeron_analysis_window_resize = EI_INIT;
 static expert_field ei_aeron_analysis_rx = EI_INIT;
+static expert_field ei_aeron_analysis_term_id_change = EI_INIT;
 
 /*----------------------------------------------------------------------------*/
 /* Setup sequence information                                                 */
@@ -1302,11 +1304,11 @@ typedef struct
     guint8 flags;
 } aeron_sequence_info_t;
 
-static void aeron_sequence_setup(packet_info * pinfo, aeron_transport_t * transport, aeron_sequence_info_t * info)
+static void aeron_sequence_setup(packet_info * pinfo, aeron_transport_t * transport, aeron_sequence_info_t * info, aeron_frame_info_t * finfo)
 {
     if (transport != NULL)
     {
-        if (aeron_sequence_analysis || aeron_stream_analysis)
+        if ((aeron_sequence_analysis || aeron_stream_analysis) && (finfo != NULL))
         {
             if (PINFO_FD_VISITED(pinfo) == 0)
             {
@@ -1322,15 +1324,16 @@ static void aeron_sequence_setup(packet_info * pinfo, aeron_transport_t * transp
                     if (info->term_id != NULL)
                     {
                         aeron_term_t * term = NULL;
+                        gboolean new_term = FALSE;
 
                         term = aeron_stream_term_find(stream, *(info->term_id));
                         if (term == NULL)
                         {
                             term = aeron_stream_term_add(stream, *(info->term_id));
+                            new_term = TRUE;
                         }
                         if (info->offset != NULL)
                         {
-                            aeron_stream_frame_analysis_t * sfa = NULL;
                             aeron_stream_rcv_t * rcv = NULL;
                             /*
                                 dp is the current data position (from this frame).
@@ -1357,6 +1360,8 @@ static void aeron_sequence_setup(packet_info * pinfo, aeron_transport_t * transp
                             aeron_pos_t prp;
                             gboolean prpv = FALSE;
                             guint32 cur_receiver_window = 0;
+                            /* Flags to be used when creating the fragment frame entry */
+                            guint32 frame_flags = 0;
 
                             if (info->type == HDR_TYPE_SM)
                             {
@@ -1378,7 +1383,8 @@ static void aeron_sequence_setup(packet_info * pinfo, aeron_transport_t * transp
                                 case HDR_TYPE_DATA:
                                 case HDR_TYPE_PAD:
                                     dp.term_id = *(info->term_id);
-                                    dp.term_offset = aeron_pos_roundup(*(info->offset) + info->len);
+                                    dp.term_offset = *(info->offset);
+                                    aeron_pos_add_length(&dp, info->len, stream->term_length);
                                     dpv = TRUE;
                                     if (pdpv)
                                     {
@@ -1429,7 +1435,131 @@ static void aeron_sequence_setup(packet_info * pinfo, aeron_transport_t * transp
                             {
                                 if ((stream->flags & AERON_STREAM_FLAGS_HIGH_VALID) != 0)
                                 {
-                                    sfa = aeron_stream_frame_analysis_add(stream, pinfo->fd->num);
+                                    finfo->analysis = wmem_new0(wmem_file_scope(), aeron_stream_analysis_t);
+                                }
+                            }
+                            if (finfo->analysis != NULL)
+                            {
+                                switch (info->type)
+                                {
+                                    case HDR_TYPE_DATA:
+                                    case HDR_TYPE_SM:
+                                    case HDR_TYPE_PAD:
+                                        finfo->analysis->high.term_id = stream->high.term_id;
+                                        finfo->analysis->high.term_offset = stream->high.term_offset;
+                                        if (rcv != NULL)
+                                        {
+                                            finfo->analysis->flags2 |= AERON_STREAM_ANALYSIS_FLAGS2_RCV_VALID;
+                                            finfo->analysis->completed.term_id = rcv->completed.term_id;
+                                            finfo->analysis->completed.term_offset = rcv->completed.term_offset;
+                                            finfo->analysis->receiver_window = rcv->receiver_window;
+                                            finfo->analysis->outstanding_bytes = aeron_pos_delta(&(finfo->analysis->high), &(finfo->analysis->completed), stream->term_length);
+                                            if (finfo->analysis->outstanding_bytes >= finfo->analysis->receiver_window)
+                                            {
+                                                finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_WINDOW_FULL;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            finfo->analysis->completed.term_id = 0;
+                                            finfo->analysis->completed.term_offset = 0;
+                                            finfo->analysis->receiver_window = 0;
+                                            finfo->analysis->outstanding_bytes = 0;
+                                        }
+                                        break;
+                                    default:
+                                        break;
+                                }
+                                switch (info->type)
+                                {
+                                    case HDR_TYPE_DATA:
+                                    case HDR_TYPE_PAD:
+                                        if (pdpv)
+                                        {
+                                            /* We have a previous data position. */
+                                            int rc = aeron_pos_compare(&dp, &pdp);
+                                            if (rc == 0)
+                                            {
+                                                /* Data position is the same as previous data position. */
+                                                if (info->len == 0)
+                                                {
+                                                    finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_KEEPALIVE;
+                                                    frame_flags |= AERON_FRAME_INFO_FLAGS_KEEPALIVE;
+                                                }
+                                                else
+                                                {
+                                                    if (prpv)
+                                                    {
+                                                        /* Previous receiver position is valid */
+                                                        if (aeron_pos_compare(&dp, &prp) == 0)
+                                                        {
+                                                            finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_IDLE_RX;
+                                                        }
+                                                        else
+                                                        {
+                                                            finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_PACING_RX;
+                                                        }
+                                                    }
+                                                    else
+                                                    {
+                                                        finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_IDLE_RX;
+                                                    }
+                                                    frame_flags |= AERON_FRAME_INFO_FLAGS_RETRANSMISSION;
+                                                }
+                                            }
+                                            else
+                                            {
+                                                aeron_pos_t expected_dp;
+                                                int erc;
+
+                                                expected_dp.term_id = pdp.term_id;
+                                                expected_dp.term_offset = pdp.term_offset;
+                                                aeron_pos_add_length(&expected_dp, info->len, stream->term_length);
+                                                erc = aeron_pos_compare(&expected_dp, &dp);
+                                                if (erc > 0)
+                                                {
+                                                    /* Could be OOO - but for now assume it's a RX */
+                                                    finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_RX;
+                                                    frame_flags |= AERON_FRAME_INFO_FLAGS_RETRANSMISSION;
+                                                }
+                                                else if (erc < 0)
+                                                {
+                                                    finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_OOO_GAP;
+                                                }
+                                            }
+                                        }
+                                        if (new_term && (*(info->offset) == 0))
+                                        {
+                                            finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_TERM_ID_CHANGE;
+                                        }
+                                        break;
+                                    case HDR_TYPE_SM:
+                                        if (prpv)
+                                        {
+                                            int rc = aeron_pos_compare(&rp, &prp);
+                                            if (rc == 0)
+                                            {
+                                                /* Completed term ID and offset stayed the same. */
+                                                if (pdpv)
+                                                {
+                                                    if (aeron_pos_compare(&pdp, &rp) == 0)
+                                                    {
+                                                        finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_KEEPALIVE_SM;
+                                                    }
+                                                }
+                                            }
+                                            else if (rc < 0)
+                                            {
+                                                finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_OOO_SM;
+                                            }
+                                            if (cur_receiver_window != finfo->analysis->receiver_window)
+                                            {
+                                                finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_WINDOW_RESIZE;
+                                            }
+                                        }
+                                        break;
+                                    default:
+                                        break;
                                 }
                             }
                             if (info->type == HDR_TYPE_DATA)
@@ -1452,199 +1582,72 @@ static void aeron_sequence_setup(packet_info * pinfo, aeron_transport_t * transp
                                 {
                                     fragment->is_end_msg = TRUE;
                                 }
-                                aeron_fragment_frame_add(fragment, pinfo->fd->num);
+                                aeron_fragment_frame_add(fragment, finfo, frame_flags, info->len);
                             }
-                            if (sfa != NULL)
+                            else
                             {
-                                switch (info->type)
-                                {
-                                    case HDR_TYPE_DATA:
-                                    case HDR_TYPE_SM:
-                                    case HDR_TYPE_PAD:
-                                        sfa->high.term_id = stream->high.term_id;
-                                        sfa->high.term_offset = stream->high.term_offset;
-                                        if (rcv != NULL)
-                                        {
-                                            sfa->flags2 |= AERON_STREAM_FRAME_ANALYSIS_FLAGS2_RCV_VALID;
-                                            sfa->completed.term_id = rcv->completed.term_id;
-                                            sfa->completed.term_offset = rcv->completed.term_offset;
-                                            sfa->receiver_window = rcv->receiver_window;
-                                            sfa->outstanding_bytes = aeron_pos_delta(&(sfa->high), &(sfa->completed), stream->term_length);
-                                            if (sfa->outstanding_bytes >= sfa->receiver_window)
-                                            {
-                                                sfa->flags |= AERON_STREAM_FRAME_ANALYSIS_FLAGS_WINDOW_FULL;
-                                            }
-                                        }
-                                        else
-                                        {
-                                            sfa->completed.term_id = 0;
-                                            sfa->completed.term_offset = 0;
-                                            sfa->receiver_window = 0;
-                                            sfa->outstanding_bytes = 0;
-                                        }
-                                        break;
-                                    default:
-                                        break;
-                                }
-                                switch (info->type)
-                                {
-                                    case HDR_TYPE_DATA:
-                                    case HDR_TYPE_PAD:
-                                        if (pdpv)
-                                        {
-                                            /* We have a previous data position. */
-                                            int rc = aeron_pos_compare(&dp, &pdp);
-                                            if (rc == 0)
-                                            {
-                                                /* Data position is the same as previous data position. */
-                                                if (info->len == 0)
-                                                {
-                                                    sfa->flags |= AERON_STREAM_FRAME_ANALYSIS_FLAGS_KEEPALIVE;
-                                                }
-                                                else
-                                                {
-                                                    if (prpv)
-                                                    {
-                                                        /* Previous receiver position is valid */
-                                                        if (aeron_pos_compare(&dp, &prp) == 0)
-                                                        {
-                                                            sfa->flags |= AERON_STREAM_FRAME_ANALYSIS_FLAGS_IDLE_RX;
-                                                        }
-                                                        else
-                                                        {
-                                                            sfa->flags |= AERON_STREAM_FRAME_ANALYSIS_FLAGS_PACING_RX;
-                                                        }
-                                                    }
-                                                    else
-                                                    {
-                                                        sfa->flags |= AERON_STREAM_FRAME_ANALYSIS_FLAGS_IDLE_RX;
-                                                    }
-                                                }
-                                            }
-                                            else
-                                            {
-                                                aeron_pos_t expected_dp;
-                                                int erc;
-
-                                                expected_dp.term_id = pdp.term_id;
-                                                expected_dp.term_offset = pdp.term_offset;
-                                                aeron_pos_add_length(&expected_dp, info->len, stream->term_length);
-                                                erc = aeron_pos_compare(&expected_dp, &dp);
-                                                if (erc > 0)
-                                                {
-                                                    /* Could be OOO - but for now assume it's a RX */
-                                                    sfa->flags |= AERON_STREAM_FRAME_ANALYSIS_FLAGS_RX;
-                                                }
-                                                else if (erc < 0)
-                                                {
-                                                    sfa->flags |= AERON_STREAM_FRAME_ANALYSIS_FLAGS_OOO_GAP;
-                                                }
-                                            }
-                                        }
-                                        break;
-                                    case HDR_TYPE_SM:
-                                        if (prpv)
-                                        {
-                                            int rc = aeron_pos_compare(&rp, &prp);
-                                            if (rc == 0)
-                                            {
-                                                /* Completed term ID and offset stayed the same. */
-                                                if (pdpv)
-                                                {
-                                                    if (aeron_pos_compare(&pdp, &rp) == 0)
-                                                    {
-                                                        sfa->flags |= AERON_STREAM_FRAME_ANALYSIS_FLAGS_KEEPALIVE_SM;
-                                                    }
-                                                }
-                                            }
-                                            else if (rc < 0)
-                                            {
-                                                sfa->flags |= AERON_STREAM_FRAME_ANALYSIS_FLAGS_OOO_SM;
-                                            }
-                                            if (cur_receiver_window != sfa->receiver_window)
-                                            {
-                                                sfa->flags |= AERON_STREAM_FRAME_ANALYSIS_FLAGS_WINDOW_RESIZE;
-                                            }
-                                        }
-                                        break;
-                                    default:
-                                        break;
-                                }
+                                aeron_term_frame_add(term, finfo, frame_flags);
                             }
                         }
                         else
                         {
-                            aeron_term_frame_add(term, pinfo->fd->num);
+                            aeron_term_frame_add(term, finfo, 0);
                         }
                     }
                     else
                     {
-                        aeron_stream_frame_add(stream, pinfo->fd->num);
+                        aeron_stream_frame_add(stream, finfo, 0);
                     }
                 }
                 else
                 {
-                    aeron_transport_frame_add(transport, pinfo->fd->num);
+                    aeron_transport_frame_add(transport, finfo, 0);
                 }
             }
         }
     }
 }
 
-typedef struct
+static void aeron_sequence_report_frame(tvbuff_t * tvb, proto_tree * tree, aeron_frame_info_t * finfo)
 {
-    proto_tree * tree;
-    tvbuff_t * tvb;
-    guint32 current_frame;
-} aeron_sequence_report_frame_callback_data_t;
-
-static gboolean aeron_sequence_report_frame_callback(void * frame, void * user_data)
-{
-    aeron_sequence_report_frame_callback_data_t * cb_data = (aeron_sequence_report_frame_callback_data_t *) user_data;
     proto_item * item = NULL;
-    aeron_frame_t * offset_frame = (aeron_frame_t *) frame;
 
-    if (offset_frame->frame != cb_data->current_frame)
+    if ((finfo->flags & AERON_FRAME_INFO_FLAGS_RETRANSMISSION) != 0)
     {
-        if (offset_frame->retransmission)
-        {
-            item = proto_tree_add_uint_format_value(cb_data->tree, hf_aeron_sequence_analysis_term_offset_frame, cb_data->tvb, 0, 0, offset_frame->frame, "%" G_GUINT32_FORMAT " (RX)", offset_frame->frame);
-        }
-        else
-        {
-            item = proto_tree_add_uint(cb_data->tree, hf_aeron_sequence_analysis_term_offset_frame, cb_data->tvb, 0, 0, offset_frame->frame);
-        }
-        PROTO_ITEM_SET_GENERATED(item);
+        item = proto_tree_add_uint_format_value(tree, hf_aeron_sequence_analysis_term_offset_frame, tvb, 0, 0, finfo->frame, "%" G_GUINT32_FORMAT " (RX)", finfo->frame);
     }
-    return (FALSE);
+    else if ((finfo->flags & AERON_FRAME_INFO_FLAGS_KEEPALIVE) != 0)
+    {
+        item = proto_tree_add_uint_format_value(tree, hf_aeron_sequence_analysis_term_offset_frame, tvb, 0, 0, finfo->frame, "%" G_GUINT32_FORMAT " (KA)", finfo->frame);
+    }
+    else
+    {
+        item = proto_tree_add_uint(tree, hf_aeron_sequence_analysis_term_offset_frame, tvb, 0, 0, finfo->frame);
+    }
+    PROTO_ITEM_SET_GENERATED(item);
 }
 
-static void aeron_sequence_report(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree, aeron_transport_t * transport, aeron_sequence_info_t * sinfo)
+static void aeron_sequence_report(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree, aeron_transport_t * transport, aeron_sequence_info_t * sinfo, aeron_frame_info_t * finfo)
 {
     if (transport != NULL)
     {
-        if (aeron_sequence_analysis)
+        if (aeron_sequence_analysis && (finfo != NULL))
         {
             proto_tree * subtree = NULL;
             proto_item * item = NULL;
-            aeron_frame_t * frame = NULL;
 
             item = proto_tree_add_item(tree, hf_aeron_sequence_analysis, tvb, 0, 0, ENC_NA);
             PROTO_ITEM_SET_GENERATED(item);
             subtree = proto_item_add_subtree(item, ett_aeron_sequence_analysis);
-            frame = aeron_transport_frame_find(transport, pinfo->fd->num);
-            if (frame != NULL)
+            if (finfo->transport.previous != 0)
             {
-                if (frame->previous_frame != 0)
-                {
-                    item = proto_tree_add_uint(subtree, hf_aeron_sequence_analysis_channel_prev_frame, tvb, 0, 0, frame->previous_frame);
-                    PROTO_ITEM_SET_GENERATED(item);
-                }
-                if (frame->next_frame != 0)
-                {
-                    item = proto_tree_add_uint(subtree, hf_aeron_sequence_analysis_channel_next_frame, tvb, 0, 0, frame->next_frame);
-                    PROTO_ITEM_SET_GENERATED(item);
-                }
+                item = proto_tree_add_uint(subtree, hf_aeron_sequence_analysis_channel_prev_frame, tvb, 0, 0, finfo->transport.previous);
+                PROTO_ITEM_SET_GENERATED(item);
+            }
+            if (finfo->transport.next != 0)
+            {
+                item = proto_tree_add_uint(subtree, hf_aeron_sequence_analysis_channel_next_frame, tvb, 0, 0, finfo->transport.next);
+                PROTO_ITEM_SET_GENERATED(item);
             }
             if (sinfo->stream_id != NULL)
             {
@@ -1653,19 +1656,15 @@ static void aeron_sequence_report(tvbuff_t * tvb, packet_info * pinfo, proto_tre
                 stream = aeron_transport_stream_find(transport, *(sinfo->stream_id));
                 if (stream != NULL)
                 {
-                    frame = aeron_stream_frame_find(stream, pinfo->fd->num);
-                    if (frame != NULL)
+                    if (finfo->stream.previous != 0)
                     {
-                        if (frame->previous_frame != 0)
-                        {
-                            item = proto_tree_add_uint(subtree, hf_aeron_sequence_analysis_stream_prev_frame, tvb, 0, 0, frame->previous_frame);
-                            PROTO_ITEM_SET_GENERATED(item);
-                        }
-                        if (frame->next_frame != 0)
-                        {
-                            item = proto_tree_add_uint(subtree, hf_aeron_sequence_analysis_stream_next_frame, tvb, 0, 0, frame->next_frame);
-                            PROTO_ITEM_SET_GENERATED(item);
-                        }
+                        item = proto_tree_add_uint(subtree, hf_aeron_sequence_analysis_stream_prev_frame, tvb, 0, 0, finfo->stream.previous);
+                        PROTO_ITEM_SET_GENERATED(item);
+                    }
+                    if (finfo->stream.next != 0)
+                    {
+                        item = proto_tree_add_uint(subtree, hf_aeron_sequence_analysis_stream_next_frame, tvb, 0, 0, finfo->stream.next);
+                        PROTO_ITEM_SET_GENERATED(item);
                     }
                     if (sinfo->term_id != NULL)
                     {
@@ -1674,47 +1673,57 @@ static void aeron_sequence_report(tvbuff_t * tvb, packet_info * pinfo, proto_tre
                         term = aeron_stream_term_find(stream, *(sinfo->term_id));
                         if (term != NULL)
                         {
-                            frame = aeron_term_frame_find(term, pinfo->fd->num);
-                            if (frame != NULL)
+                            if (finfo->term.previous != 0)
                             {
-                                if (frame->previous_frame != 0)
-                                {
-                                    item = proto_tree_add_uint(subtree, hf_aeron_sequence_analysis_term_prev_frame, tvb, 0, 0, frame->previous_frame);
-                                    PROTO_ITEM_SET_GENERATED(item);
-                                }
-                                if (frame->next_frame != 0)
-                                {
-                                    item = proto_tree_add_uint(subtree, hf_aeron_sequence_analysis_term_next_frame, tvb, 0, 0, frame->next_frame);
-                                    PROTO_ITEM_SET_GENERATED(item);
-                                }
+                                item = proto_tree_add_uint(subtree, hf_aeron_sequence_analysis_term_prev_frame, tvb, 0, 0, finfo->term.previous);
+                                PROTO_ITEM_SET_GENERATED(item);
+                            }
+                            if (finfo->term.next != 0)
+                            {
+                                item = proto_tree_add_uint(subtree, hf_aeron_sequence_analysis_term_next_frame, tvb, 0, 0, finfo->term.next);
+                                PROTO_ITEM_SET_GENERATED(item);
                             }
                             if (sinfo->offset != NULL)
                             {
-                                aeron_fragment_t * fragment = NULL;
-
-                                fragment = aeron_term_fragment_find(term, *(sinfo->offset));
-                                if (fragment != NULL)
+                                if ((sinfo->type == HDR_TYPE_DATA) || (sinfo->type == HDR_TYPE_PAD))
                                 {
-                                    if (fragment->frame_count > 1)
-                                    {
-                                        proto_tree * frame_tree = NULL;
-                                        proto_item * frame_item = NULL;
-                                        aeron_sequence_report_frame_callback_data_t cb_data;
+                                    aeron_fragment_t * fragment = NULL;
 
-                                        frame_item = proto_tree_add_item(subtree, hf_aeron_sequence_analysis_term_offset, tvb, 0, 0, ENC_NA);
-                                        PROTO_ITEM_SET_GENERATED(frame_item);
-                                        frame_tree = proto_item_add_subtree(frame_item, ett_aeron_sequence_analysis_term_offset);
-                                        cb_data.tree = frame_tree;
-                                        cb_data.tvb = tvb;
-                                        cb_data.current_frame = pinfo->fd->num;
-                                        wmem_tree_foreach(fragment->frame, aeron_sequence_report_frame_callback, (void *) &cb_data);
-                                    }
-                                    frame = aeron_fragment_frame_find(fragment, pinfo->fd->num);
-                                    if (frame != NULL)
+                                    fragment = aeron_term_fragment_find(term, *(sinfo->offset));
+                                    if (fragment != NULL)
                                     {
-                                        proto_item * rx_item = NULL;
-                                        rx_item = proto_tree_add_boolean(subtree, hf_aeron_sequence_analysis_retransmission, tvb, 0, 0, frame->retransmission);
-                                        PROTO_ITEM_SET_GENERATED(rx_item);
+                                        proto_item * fei_item = NULL;
+                                        gboolean rx = ((finfo->flags & AERON_FRAME_INFO_FLAGS_RETRANSMISSION) != 0);
+                                        gboolean ka = ((finfo->flags & AERON_FRAME_INFO_FLAGS_KEEPALIVE) != 0);
+
+                                        if (fragment->frame_count > 1)
+                                        {
+                                            proto_tree * frame_tree = NULL;
+                                            proto_item * frame_item = NULL;
+                                            wmem_list_frame_t * lf = NULL;
+
+                                            frame_item = proto_tree_add_item(subtree, hf_aeron_sequence_analysis_term_offset, tvb, 0, 0, ENC_NA);
+                                            PROTO_ITEM_SET_GENERATED(frame_item);
+                                            frame_tree = proto_item_add_subtree(frame_item, ett_aeron_sequence_analysis_term_offset);
+                                            lf = wmem_list_head(fragment->frame);
+                                            while (lf != NULL)
+                                            {
+                                                aeron_frame_info_t * frag_frame = (aeron_frame_info_t *) wmem_list_frame_data(lf);
+                                                if (lf == NULL)
+                                                {
+                                                    break;
+                                                }
+                                                if (frag_frame->frame != pinfo->fd->num)
+                                                {
+                                                    aeron_sequence_report_frame(tvb, frame_tree, frag_frame);
+                                                }
+                                                lf = wmem_list_frame_next(lf);
+                                            }
+                                        }
+                                        fei_item = proto_tree_add_boolean(subtree, hf_aeron_sequence_analysis_retransmission, tvb, 0, 0, rx);
+                                        PROTO_ITEM_SET_GENERATED(fei_item);
+                                        fei_item = proto_tree_add_boolean(subtree, hf_aeron_sequence_analysis_keepalive, tvb, 0, 0, ka);
+                                        PROTO_ITEM_SET_GENERATED(fei_item);
                                     }
                                 }
                             }
@@ -1726,73 +1735,69 @@ static void aeron_sequence_report(tvbuff_t * tvb, packet_info * pinfo, proto_tre
     }
 }
 
-static void aeron_stream_report(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree, aeron_transport_t * transport, guint32 stream_id)
+static void aeron_stream_report(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree, aeron_transport_t * transport, aeron_frame_info_t * finfo)
 {
     if (transport != NULL)
     {
-        if (aeron_stream_analysis)
+        if (aeron_stream_analysis && (finfo != NULL) && (finfo->analysis != NULL))
         {
-            aeron_stream_t * stream = aeron_transport_stream_find(transport, stream_id);
-            if (stream != NULL)
-            {
-                aeron_stream_frame_analysis_t * sfa = aeron_stream_frame_analysis_find(stream, pinfo->fd->num);
-                if (sfa != NULL)
-                {
-                    proto_tree * subtree = NULL;
-                    proto_item * item = NULL;
+            proto_tree * subtree = NULL;
+            proto_item * item = NULL;
 
-                    item = proto_tree_add_item(tree, hf_aeron_stream_analysis, tvb, 0, 0, ENC_NA);
-                    PROTO_ITEM_SET_GENERATED(item);
-                    subtree = proto_item_add_subtree(item, ett_aeron_stream_analysis);
-                    item = proto_tree_add_uint(subtree, hf_aeron_stream_analysis_high_term_id, tvb, 0, 0, sfa->high.term_id);
-                    PROTO_ITEM_SET_GENERATED(item);
-                    item = proto_tree_add_uint(subtree, hf_aeron_stream_analysis_high_term_offset, tvb, 0, 0, sfa->high.term_offset);
-                    PROTO_ITEM_SET_GENERATED(item);
-                    if ((sfa->flags & AERON_STREAM_FRAME_ANALYSIS_FLAGS_IDLE_RX) != 0)
-                    {
-                        expert_add_info(pinfo, item, &ei_aeron_analysis_idle_rx);
-                    }
-                    if ((sfa->flags & AERON_STREAM_FRAME_ANALYSIS_FLAGS_PACING_RX) != 0)
-                    {
-                        expert_add_info(pinfo, item, &ei_aeron_analysis_pacing_rx);
-                    }
-                    if ((sfa->flags & AERON_STREAM_FRAME_ANALYSIS_FLAGS_OOO) != 0)
-                    {
-                        expert_add_info(pinfo, item, &ei_aeron_analysis_ooo);
-                    }
-                    if ((sfa->flags & AERON_STREAM_FRAME_ANALYSIS_FLAGS_OOO_GAP) != 0)
-                    {
-                        expert_add_info(pinfo, item, &ei_aeron_analysis_ooo_gap);
-                    }
-                    if ((sfa->flags & AERON_STREAM_FRAME_ANALYSIS_FLAGS_KEEPALIVE) != 0)
-                    {
-                        expert_add_info(pinfo, item, &ei_aeron_analysis_keepalive);
-                    }
-                    if ((sfa->flags & AERON_STREAM_FRAME_ANALYSIS_FLAGS_RX) != 0)
-                    {
-                        expert_add_info(pinfo, item, &ei_aeron_analysis_rx);
-                    }
-                    if ((sfa->flags2 & AERON_STREAM_FRAME_ANALYSIS_FLAGS2_RCV_VALID) != 0)
-                    {
-                        item = proto_tree_add_uint(subtree, hf_aeron_stream_analysis_completed_term_id, tvb, 0, 0, sfa->completed.term_id);
-                        PROTO_ITEM_SET_GENERATED(item);
-                        item = proto_tree_add_uint(subtree, hf_aeron_stream_analysis_completed_term_offset, tvb, 0, 0, sfa->completed.term_offset);
-                        PROTO_ITEM_SET_GENERATED(item);
-                        if ((sfa->flags & AERON_STREAM_FRAME_ANALYSIS_FLAGS_OOO_SM) != 0)
-                        {
-                            expert_add_info(pinfo, item, &ei_aeron_analysis_ooo_sm);
-                        }
-                        if ((sfa->flags & AERON_STREAM_FRAME_ANALYSIS_FLAGS_KEEPALIVE_SM) != 0)
-                        {
-                            expert_add_info(pinfo, item, &ei_aeron_analysis_keepalive_sm);
-                        }
-                        item = proto_tree_add_uint(subtree, hf_aeron_stream_analysis_outstanding_bytes, tvb, 0, 0, sfa->outstanding_bytes);
-                        PROTO_ITEM_SET_GENERATED(item);
-                        if ((sfa->flags & AERON_STREAM_FRAME_ANALYSIS_FLAGS_WINDOW_FULL) != 0)
-                        {
-                            expert_add_info(pinfo, item, &ei_aeron_analysis_window_full);
-                        }
-                    }
+            item = proto_tree_add_item(tree, hf_aeron_stream_analysis, tvb, 0, 0, ENC_NA);
+            PROTO_ITEM_SET_GENERATED(item);
+            subtree = proto_item_add_subtree(item, ett_aeron_stream_analysis);
+            item = proto_tree_add_uint(subtree, hf_aeron_stream_analysis_high_term_id, tvb, 0, 0, finfo->analysis->high.term_id);
+            if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_TERM_ID_CHANGE) != 0)
+            {
+                expert_add_info(pinfo, item, &ei_aeron_analysis_term_id_change);
+            }
+            PROTO_ITEM_SET_GENERATED(item);
+            item = proto_tree_add_uint(subtree, hf_aeron_stream_analysis_high_term_offset, tvb, 0, 0, finfo->analysis->high.term_offset);
+            PROTO_ITEM_SET_GENERATED(item);
+            if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_IDLE_RX) != 0)
+            {
+                expert_add_info(pinfo, item, &ei_aeron_analysis_idle_rx);
+            }
+            if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_PACING_RX) != 0)
+            {
+                expert_add_info(pinfo, item, &ei_aeron_analysis_pacing_rx);
+            }
+            if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_OOO) != 0)
+            {
+                expert_add_info(pinfo, item, &ei_aeron_analysis_ooo);
+            }
+            if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_OOO_GAP) != 0)
+            {
+                expert_add_info(pinfo, item, &ei_aeron_analysis_ooo_gap);
+            }
+            if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_KEEPALIVE) != 0)
+            {
+                expert_add_info(pinfo, item, &ei_aeron_analysis_keepalive);
+            }
+            if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_RX) != 0)
+            {
+                expert_add_info(pinfo, item, &ei_aeron_analysis_rx);
+            }
+            if ((finfo->analysis->flags2 & AERON_STREAM_ANALYSIS_FLAGS2_RCV_VALID) != 0)
+            {
+                item = proto_tree_add_uint(subtree, hf_aeron_stream_analysis_completed_term_id, tvb, 0, 0, finfo->analysis->completed.term_id);
+                PROTO_ITEM_SET_GENERATED(item);
+                item = proto_tree_add_uint(subtree, hf_aeron_stream_analysis_completed_term_offset, tvb, 0, 0, finfo->analysis->completed.term_offset);
+                PROTO_ITEM_SET_GENERATED(item);
+                if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_OOO_SM) != 0)
+                {
+                    expert_add_info(pinfo, item, &ei_aeron_analysis_ooo_sm);
+                }
+                if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_KEEPALIVE_SM) != 0)
+                {
+                    expert_add_info(pinfo, item, &ei_aeron_analysis_keepalive_sm);
+                }
+                item = proto_tree_add_uint(subtree, hf_aeron_stream_analysis_outstanding_bytes, tvb, 0, 0, finfo->analysis->outstanding_bytes);
+                PROTO_ITEM_SET_GENERATED(item);
+                if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_WINDOW_FULL) != 0)
+                {
+                    expert_add_info(pinfo, item, &ei_aeron_analysis_window_full);
                 }
             }
         }
@@ -1859,62 +1864,50 @@ static void aeron_next_offset_report(tvbuff_t * tvb, proto_tree * tree, aeron_tr
     }
 }
 
-static void aeron_info_stream_progress_report(packet_info * pinfo, guint16 msgtype, aeron_transport_t * transport, guint32 stream_id)
+static void aeron_info_stream_progress_report(packet_info * pinfo, guint16 msgtype, guint8 flags, aeron_transport_t * transport _U_, aeron_frame_info_t * finfo)
 {
-    aeron_stream_t * stream = NULL;
-    aeron_stream_frame_analysis_t * sfa = NULL;
     const gchar * type_string = val_to_str_const((guint32) msgtype, aeron_frame_type, "Unknown");
 
-    if (aeron_stream_analysis)
-    {
-        switch (msgtype)
-        {
-            case HDR_TYPE_DATA:
-            case HDR_TYPE_PAD:
-            case HDR_TYPE_SM:
-                stream = aeron_transport_stream_find(transport, stream_id);
-                if (stream != NULL)
-                {
-                    sfa = aeron_stream_frame_analysis_find(stream, pinfo->fd->num);
-                }
-                break;
-            default:
-                break;
-        }
-    }
-    if (sfa != NULL)
+    if (aeron_stream_analysis && (finfo != NULL) && (finfo->analysis != NULL))
     {
         switch (msgtype)
         {
             case HDR_TYPE_PAD:
             case HDR_TYPE_DATA:
                 col_append_sep_fstr(pinfo->cinfo, COL_INFO, " ", "%s (0x%08x:%" G_GUINT32_FORMAT ")",
-                    type_string, sfa->high.term_id, sfa->high.term_offset);
+                    type_string, finfo->analysis->high.term_id, finfo->analysis->high.term_offset);
                 break;
             case HDR_TYPE_SM:
-                if (sfa->high.term_id == sfa->completed.term_id)
+                if (finfo->analysis->high.term_id == finfo->analysis->completed.term_id)
                 {
                     col_append_sep_fstr(pinfo->cinfo, COL_INFO, " ", "%s (%" G_GUINT32_FORMAT "/%" G_GUINT32_FORMAT " [%" G_GUINT32_FORMAT "])",
-                        type_string, sfa->high.term_offset, sfa->completed.term_offset, sfa->outstanding_bytes);
+                        type_string, finfo->analysis->high.term_offset, finfo->analysis->completed.term_offset, finfo->analysis->outstanding_bytes);
                 }
                 else
                 {
                     col_append_sep_fstr(pinfo->cinfo, COL_INFO, " ", "%s (0x%08x:%" G_GUINT32_FORMAT "/0x%08x:%" G_GUINT32_FORMAT " [%" G_GUINT32_FORMAT "])",
-                        type_string, sfa->high.term_id, sfa->high.term_offset, sfa->completed.term_id, sfa->completed.term_offset, sfa->outstanding_bytes);
+                        type_string, finfo->analysis->high.term_id, finfo->analysis->high.term_offset, finfo->analysis->completed.term_id, finfo->analysis->completed.term_offset, finfo->analysis->outstanding_bytes);
                 }
                 break;
         }
     }
     else
     {
-        col_append_sep_str(pinfo->cinfo, COL_INFO, " ", type_string);
+        if ((msgtype == HDR_TYPE_SM) && ((flags & STATUS_FLAGS_SETUP) != 0))
+        {
+            col_append_sep_fstr(pinfo->cinfo, COL_INFO, " ", "%s[SETUP]", type_string);
+        }
+        else
+        {
+            col_append_sep_str(pinfo->cinfo, COL_INFO, " ", type_string);
+        }
     }
 }
 
 /*----------------------------------------------------------------------------*/
 /* Aeron pad message packet dissection functions.                             */
 /*----------------------------------------------------------------------------*/
-static int dissect_aeron_pad(tvbuff_t * tvb, int offset, packet_info * pinfo, proto_tree * tree, aeron_conversation_info_t * cinfo)
+static int dissect_aeron_pad(tvbuff_t * tvb, int offset, packet_info * pinfo, proto_tree * tree, aeron_conversation_info_t * cinfo, aeron_frame_info_t * finfo)
 {
     proto_tree * subtree = NULL;
     proto_item * item = NULL;
@@ -1944,10 +1937,10 @@ static int dissect_aeron_pad(tvbuff_t * tvb, int offset, packet_info * pinfo, pr
     sinfo.data_len = pad_len;
     sinfo.receiver_window = 0;
     sinfo.type = HDR_TYPE_PAD;
-    sinfo.flags = 0;
-    aeron_sequence_setup(pinfo, transport, &sinfo);
+    sinfo.flags = tvb_get_guint8(tvb, offset + O_AERON_PAD_FLAGS);
+    aeron_sequence_setup(pinfo, transport, &sinfo, finfo);
 
-    aeron_info_stream_progress_report(pinfo, HDR_TYPE_PAD, transport, stream_id);
+    aeron_info_stream_progress_report(pinfo, HDR_TYPE_PAD, sinfo.flags, transport, finfo);
     item = proto_tree_add_none_format(tree, hf_aeron_pad, tvb, offset, -1, "Pad Frame: Term 0x%x, Ofs %" G_GUINT32_FORMAT ", Len %" G_GUINT32_FORMAT "(%d)",
         term_id, term_offset, frame_len, rounded_len);
     subtree = proto_item_add_subtree(item, ett_aeron_pad);
@@ -1962,8 +1955,8 @@ static int dissect_aeron_pad(tvbuff_t * tvb, int offset, packet_info * pinfo, pr
     proto_tree_add_item(subtree, hf_aeron_pad_session_id, tvb, offset + O_AERON_PAD_SESSION_ID, 4, ENC_LITTLE_ENDIAN);
     proto_tree_add_item(subtree, hf_aeron_pad_stream_id, tvb, offset + O_AERON_PAD_STREAM_ID, 4, ENC_LITTLE_ENDIAN);
     proto_tree_add_item(subtree, hf_aeron_pad_term_id, tvb, offset + O_AERON_PAD_TERM_ID, 4, ENC_LITTLE_ENDIAN);
-    aeron_sequence_report(tvb, pinfo, subtree, transport, &sinfo);
-    aeron_stream_report(tvb, pinfo, subtree, transport, stream_id);
+    aeron_sequence_report(tvb, pinfo, subtree, transport, &sinfo, finfo);
+    aeron_stream_report(tvb, pinfo, subtree, transport, finfo);
     proto_item_set_len(item, L_AERON_PAD);
     return (L_AERON_PAD);
 }
@@ -1971,7 +1964,7 @@ static int dissect_aeron_pad(tvbuff_t * tvb, int offset, packet_info * pinfo, pr
 /*----------------------------------------------------------------------------*/
 /* Aeron data message packet dissection functions.                            */
 /*----------------------------------------------------------------------------*/
-static int dissect_aeron_data(tvbuff_t * tvb, int offset, packet_info * pinfo, proto_tree * tree, aeron_conversation_info_t * cinfo)
+static int dissect_aeron_data(tvbuff_t * tvb, int offset, packet_info * pinfo, proto_tree * tree, aeron_conversation_info_t * cinfo, aeron_frame_info_t * finfo)
 {
     proto_tree * subtree = NULL;
     proto_item * item = NULL;
@@ -2018,9 +2011,9 @@ static int dissect_aeron_data(tvbuff_t * tvb, int offset, packet_info * pinfo, p
     sinfo.receiver_window = 0;
     sinfo.type = HDR_TYPE_DATA;
     sinfo.flags = tvb_get_guint8(tvb, offset + O_AERON_DATA_FLAGS);
-    aeron_sequence_setup(pinfo, transport, &sinfo);
+    aeron_sequence_setup(pinfo, transport, &sinfo, finfo);
 
-    aeron_info_stream_progress_report(pinfo, HDR_TYPE_DATA, transport, stream_id);
+    aeron_info_stream_progress_report(pinfo, HDR_TYPE_DATA, sinfo.flags, transport, finfo);
     item = proto_tree_add_none_format(tree, hf_aeron_data, tvb, offset, -1, "Data Frame: Term 0x%x, Ofs %" G_GUINT32_FORMAT ", Len %" G_GUINT32_FORMAT "(%d)",
         (guint32) term_id, term_offset, frame_len, rounded_len);
     subtree = proto_item_add_subtree(item, ett_aeron_data);
@@ -2039,8 +2032,8 @@ static int dissect_aeron_data(tvbuff_t * tvb, int offset, packet_info * pinfo, p
     {
         proto_tree_add_item(subtree, hf_aeron_data_data, tvb, offset + O_AERON_DATA_DATA, data_len, ENC_NA);
     }
-    aeron_sequence_report(tvb, pinfo, subtree, transport, &sinfo);
-    aeron_stream_report(tvb, pinfo, subtree, transport, stream_id);
+    aeron_sequence_report(tvb, pinfo, subtree, transport, &sinfo, finfo);
+    aeron_stream_report(tvb, pinfo, subtree, transport, finfo);
     proto_item_set_len(item, rounded_len);
 #if AERON_REASSEMBLY
     if (aeron_reassemble_fragments)
@@ -2081,7 +2074,7 @@ static int dissect_aeron_data(tvbuff_t * tvb, int offset, packet_info * pinfo, p
 /*----------------------------------------------------------------------------*/
 /* Aeron NAK packet dissection functions.                                     */
 /*----------------------------------------------------------------------------*/
-static int dissect_aeron_nak(tvbuff_t * tvb, int offset, packet_info * pinfo, proto_tree * tree, aeron_conversation_info_t * cinfo)
+static int dissect_aeron_nak(tvbuff_t * tvb, int offset, packet_info * pinfo, proto_tree * tree, aeron_conversation_info_t * cinfo, aeron_frame_info_t * finfo)
 {
     proto_tree * subtree = NULL;
     proto_item * item = NULL;
@@ -2112,8 +2105,8 @@ static int dissect_aeron_nak(tvbuff_t * tvb, int offset, packet_info * pinfo, pr
     sinfo.data_len = 0;
     sinfo.receiver_window = 0;
     sinfo.type = HDR_TYPE_NAK;
-    sinfo.flags = 0;
-    aeron_sequence_setup(pinfo, transport, &sinfo);
+    sinfo.flags = tvb_get_guint8(tvb, offset + O_AERON_NAK_FLAGS);
+    aeron_sequence_setup(pinfo, transport, &sinfo, finfo);
 
     col_append_sep_str(pinfo->cinfo, COL_INFO, " ", "NAK");
     item = proto_tree_add_none_format(tree, hf_aeron_nak, tvb, offset, -1, "NAK Frame: Term 0x%x, Ofs %" G_GUINT32_FORMAT ", Len %" G_GUINT32_FORMAT,
@@ -2131,37 +2124,26 @@ static int dissect_aeron_nak(tvbuff_t * tvb, int offset, packet_info * pinfo, pr
     nak_item = proto_tree_add_item(subtree, hf_aeron_nak_term_offset, tvb, offset + O_AERON_NAK_TERM_OFFSET, 4, ENC_LITTLE_ENDIAN);
     proto_tree_add_item(subtree, hf_aeron_nak_length, tvb, offset + O_AERON_NAK_LENGTH, 4, ENC_LITTLE_ENDIAN);
     expert_add_info_format(pinfo, nak_item, &ei_aeron_analysis_nak, "NAK offset %" G_GUINT32_FORMAT " length %" G_GUINT32_FORMAT, nak_term_offset, nak_length);
-    aeron_sequence_report(tvb, pinfo, subtree, transport, &sinfo);
+    aeron_sequence_report(tvb, pinfo, subtree, transport, &sinfo, finfo);
     proto_item_set_len(item, rounded_len);
     return (rounded_len);
-}
-
-static void aeron_window_resize_report(packet_info * pinfo, proto_item * item, aeron_transport_t * transport, guint32 stream_id)
-{
-    if (transport != NULL)
-    {
-        if (aeron_stream_analysis)
-        {
-            aeron_stream_t * stream = aeron_transport_stream_find(transport, stream_id);
-            if (stream != NULL)
-            {
-                aeron_stream_frame_analysis_t * sfa = aeron_stream_frame_analysis_find(stream, pinfo->fd->num);
-                if (sfa != NULL)
-                {
-                    if ((sfa->flags & AERON_STREAM_FRAME_ANALYSIS_FLAGS_WINDOW_RESIZE) != 0)
-                    {
-                        expert_add_info(pinfo, item, &ei_aeron_analysis_window_resize);
-                    }
-                }
-            }
-        }
-    }
 }
 
 /*----------------------------------------------------------------------------*/
 /* Aeron status message packet dissection functions.                          */
 /*----------------------------------------------------------------------------*/
-static int dissect_aeron_sm(tvbuff_t * tvb, int offset, packet_info * pinfo, proto_tree * tree, aeron_conversation_info_t * cinfo)
+static void aeron_window_resize_report(packet_info * pinfo, proto_item * item, aeron_frame_info_t * finfo)
+{
+    if (aeron_stream_analysis && (finfo != NULL) && (finfo->analysis != NULL))
+    {
+        if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_WINDOW_RESIZE) != 0)
+        {
+            expert_add_info(pinfo, item, &ei_aeron_analysis_window_resize);
+        }
+    }
+}
+
+static int dissect_aeron_sm(tvbuff_t * tvb, int offset, packet_info * pinfo, proto_tree * tree, aeron_conversation_info_t * cinfo, aeron_frame_info_t * finfo)
 {
     proto_tree * subtree = NULL;
     proto_item * item = NULL;
@@ -2192,16 +2174,25 @@ static int dissect_aeron_sm(tvbuff_t * tvb, int offset, packet_info * pinfo, pro
     comp_offset = tvb_get_letohl(tvb, offset + O_AERON_SM_COMPLETED_TERM_OFFSET);
     rcv_window = tvb_get_letohl(tvb, offset + O_AERON_SM_RECEIVER_WINDOW);
     sinfo.stream_id = &stream_id;
-    sinfo.term_id = &term_id;
-    sinfo.offset = &comp_offset;
+    sinfo.flags = tvb_get_guint8(tvb, offset + O_AERON_SM_FLAGS);
+    if ((sinfo.flags & STATUS_FLAGS_SETUP) == 0)
+    {
+        sinfo.term_id = &term_id;
+        sinfo.offset = &comp_offset;
+        sinfo.receiver_window = rcv_window;
+    }
+    else
+    {
+        sinfo.term_id = NULL;
+        sinfo.offset = NULL;
+        sinfo.receiver_window = 0;
+    }
     sinfo.len = 0;
     sinfo.data_len = 0;
-    sinfo.receiver_window = rcv_window;
     sinfo.type = HDR_TYPE_SM;
-    sinfo.flags = 0;
-    aeron_sequence_setup(pinfo, transport, &sinfo);
+    aeron_sequence_setup(pinfo, transport, &sinfo, finfo);
 
-    aeron_info_stream_progress_report(pinfo, HDR_TYPE_SM, transport, stream_id);
+    aeron_info_stream_progress_report(pinfo, HDR_TYPE_SM, sinfo.flags, transport, finfo);
     item = proto_tree_add_none_format(tree, hf_aeron_sm, tvb, offset, -1, "Status Message: Term 0x%x, CompletedOfs %" G_GUINT32_FORMAT ", RcvWindow %" G_GUINT32_FORMAT,
         term_id, comp_offset, rcv_window);
     subtree = proto_item_add_subtree(item, ett_aeron_sm);
@@ -2216,13 +2207,13 @@ static int dissect_aeron_sm(tvbuff_t * tvb, int offset, packet_info * pinfo, pro
     proto_tree_add_item(subtree, hf_aeron_sm_term_id, tvb, offset + O_AERON_SM_TERM_ID, 4, ENC_LITTLE_ENDIAN);
     proto_tree_add_item(subtree, hf_aeron_sm_completed_term_offset, tvb, offset + O_AERON_SM_COMPLETED_TERM_OFFSET, 4, ENC_LITTLE_ENDIAN);
     item = proto_tree_add_item(subtree, hf_aeron_sm_receiver_window, tvb, offset + O_AERON_SM_RECEIVER_WINDOW, 4, ENC_LITTLE_ENDIAN);
-    aeron_window_resize_report(pinfo, item, transport, stream_id);
+    aeron_window_resize_report(pinfo, item, finfo);
     if (feedback_len > 0)
     {
         proto_tree_add_item(subtree, hf_aeron_sm_feedback, tvb, offset + O_AERON_SM_FEEDBACK, feedback_len, ENC_NA);
     }
-    aeron_sequence_report(tvb, pinfo, subtree, transport, &sinfo);
-    aeron_stream_report(tvb, pinfo, subtree, transport, stream_id);
+    aeron_sequence_report(tvb, pinfo, subtree, transport, &sinfo, finfo);
+    aeron_stream_report(tvb, pinfo, subtree, transport, finfo);
     proto_item_set_len(item, rounded_len);
     return (rounded_len);
 }
@@ -2279,7 +2270,7 @@ static void aeron_set_stream_mtu_term_length(packet_info * pinfo, aeron_transpor
     }
 }
 
-static int dissect_aeron_setup(tvbuff_t * tvb, int offset, packet_info * pinfo, proto_tree * tree, aeron_conversation_info_t * cinfo)
+static int dissect_aeron_setup(tvbuff_t * tvb, int offset, packet_info * pinfo, proto_tree * tree, aeron_conversation_info_t * cinfo, aeron_frame_info_t * finfo)
 {
     proto_tree * subtree = NULL;
     proto_item * item = NULL;
@@ -2312,7 +2303,7 @@ static int dissect_aeron_setup(tvbuff_t * tvb, int offset, packet_info * pinfo, 
     sinfo.receiver_window = 0;
     sinfo.type = HDR_TYPE_SETUP;
     sinfo.flags = 0;
-    aeron_sequence_setup(pinfo, transport, &sinfo);
+    aeron_sequence_setup(pinfo, transport, &sinfo, finfo);
     term_length = tvb_get_letohl(tvb, offset + O_AERON_SETUP_TERM_LENGTH);
     mtu = tvb_get_letohl(tvb, offset + O_AERON_SETUP_MTU);
     aeron_set_stream_mtu_term_length(pinfo, transport, stream_id, mtu, term_length);
@@ -2334,7 +2325,7 @@ static int dissect_aeron_setup(tvbuff_t * tvb, int offset, packet_info * pinfo, 
     proto_tree_add_item(subtree, hf_aeron_setup_active_term_id, tvb, offset + O_AERON_SETUP_ACTIVE_TERM_ID, 4, ENC_LITTLE_ENDIAN);
     proto_tree_add_item(subtree, hf_aeron_setup_term_length, tvb, offset + O_AERON_SETUP_TERM_LENGTH, 4, ENC_LITTLE_ENDIAN);
     proto_tree_add_item(subtree, hf_aeron_setup_mtu, tvb, offset + O_AERON_SETUP_MTU, 4, ENC_LITTLE_ENDIAN);
-    aeron_sequence_report(tvb, pinfo, subtree, transport, &sinfo);
+    aeron_sequence_report(tvb, pinfo, subtree, transport, &sinfo, finfo);
     proto_item_set_len(item, rounded_len);
     return (rounded_len);
 }
@@ -2370,27 +2361,33 @@ static int dissect_aeron(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree,
     aeron_tree = proto_item_add_subtree(aeron_item, ett_aeron);
     while (len_remaining > 0)
     {
+        aeron_frame_info_t * finfo = NULL;
+
+        if (aeron_sequence_analysis)
+        {
+            finfo = aeron_frame_info_add(pinfo->fd->num, (guint32) offset);
+        }
         frame_type = tvb_get_letohs(tvb, offset + 2);
         cinfo = aeron_setup_conversation_info(pinfo, frame_type);
         switch (frame_type)
         {
             case HDR_TYPE_PAD:
-                dissected_len = dissect_aeron_pad(tvb, offset, pinfo, aeron_tree, cinfo);
+                dissected_len = dissect_aeron_pad(tvb, offset, pinfo, aeron_tree, cinfo, finfo);
                 break;
             case HDR_TYPE_DATA:
-                dissected_len = dissect_aeron_data(tvb, offset, pinfo, aeron_tree, cinfo);
+                dissected_len = dissect_aeron_data(tvb, offset, pinfo, aeron_tree, cinfo, finfo);
                 break;
             case HDR_TYPE_NAK:
-                dissected_len = dissect_aeron_nak(tvb, offset, pinfo, aeron_tree, cinfo);
+                dissected_len = dissect_aeron_nak(tvb, offset, pinfo, aeron_tree, cinfo, finfo);
                 break;
             case HDR_TYPE_SM:
-                dissected_len = dissect_aeron_sm(tvb, offset, pinfo, aeron_tree, cinfo);
+                dissected_len = dissect_aeron_sm(tvb, offset, pinfo, aeron_tree, cinfo, finfo);
                 break;
             case HDR_TYPE_ERR:
                 dissected_len = dissect_aeron_err(tvb, offset, pinfo, aeron_tree);
                 break;
             case HDR_TYPE_SETUP:
-                dissected_len = dissect_aeron_setup(tvb, offset, pinfo, aeron_tree, cinfo);
+                dissected_len = dissect_aeron_setup(tvb, offset, pinfo, aeron_tree, cinfo, finfo);
                 break;
             case HDR_TYPE_EXT:
             default:
@@ -2470,7 +2467,7 @@ static gboolean test_aeron_packet(tvbuff_t * tvb, packet_info * pinfo, proto_tre
 
 static void aeron_init(void)
 {
-    aeron_channel = 0;
+    aeron_channel_init();
 }
 
 /* Register all the bits needed with the filtering engine */
@@ -2632,6 +2629,8 @@ void proto_register_aeron(void)
             { "Frame", "aeron.sequence_analysis.term_offset.frame", FT_FRAMENUM, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_aeron_sequence_analysis_retransmission,
             { "Frame is a retransmission", "aeron.sequence_analysis.retransmission", FT_BOOLEAN, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_aeron_sequence_analysis_keepalive,
+            { "Frame is a keepalive", "aeron.sequence_analysis.keepalive", FT_BOOLEAN, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_aeron_stream_analysis,
             { "Stream Analysis", "aeron.stream_analysis", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_aeron_stream_analysis_high_term_id,
@@ -2673,7 +2672,8 @@ void proto_register_aeron(void)
         { &ei_aeron_analysis_window_resize, { "aeron.analysis.window_resize", PI_SEQUENCE, PI_NOTE, "Receiver window resized", EXPFILL } },
         { &ei_aeron_analysis_ooo_sm, { "aeron.analysis.ooo_sm", PI_SEQUENCE, PI_NOTE, "This frame contains an Out-of-order SM", EXPFILL } },
         { &ei_aeron_analysis_keepalive_sm, { "aeron.analysis.keepalive_sm", PI_SEQUENCE, PI_NOTE, "This frame contains a Keepalive SM", EXPFILL } },
-        { &ei_aeron_analysis_rx, { "aeron.analysis.rx", PI_SEQUENCE, PI_NOTE, "This frame contains a (likely) retransmission", EXPFILL } }
+        { &ei_aeron_analysis_rx, { "aeron.analysis.rx", PI_SEQUENCE, PI_NOTE, "This frame contains a (likely) retransmission", EXPFILL } },
+        { &ei_aeron_analysis_term_id_change, { "aeron.analysis.term_id_change", PI_SEQUENCE, PI_CHAT, "This frame contains a new term ID", EXPFILL } }
     };
     module_t * aeron_module;
     expert_module_t * expert_aeron;
@@ -2708,6 +2708,7 @@ void proto_register_aeron(void)
         &global_aeron_reassemble_fragments);
 #endif
     register_init_routine(aeron_init);
+    aeron_frame_info_tree = wmem_tree_new_autoreset(wmem_epan_scope(), wmem_file_scope());
 }
 
 /* The registration hand-off routine */
