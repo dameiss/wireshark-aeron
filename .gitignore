@@ -65,6 +65,7 @@ wireshark-tap-register-cache.pkl
 .dirstamp
 *.sym
 aclocal.m4
+androiddump
 autom4te.cache
 capinfos
 captype
@@ -223,9 +224,9 @@ packaging/macosx/osx-dmg.sh
 packaging/macosx/Wireshark_package.pmdoc/index.xml
 packaging/nsis/config.nsh
 packaging/nsis/qt-dll-manifest.nsh
-packaging/portableapps/win32/Files/
-packaging/portableapps/win32/appinfo.ini
-packaging/portableapps/win32/distribution.nmake
+packaging/portableapps/Files/
+packaging/portableapps/appinfo.ini
+packaging/portableapps/distribution.nmake
 packaging/rpm/SPECS/wireshark.spec
 packaging/svr4/checkinstall
 packaging/svr4/pkginfo

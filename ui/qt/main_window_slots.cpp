@@ -110,7 +110,8 @@
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QToolBar>
-
+#include <QDesktopServices>
+#include <QUrl>
 #include <QDebug>
 
 //
@@ -1181,7 +1182,8 @@ void MainWindow::setMenusForSelectedTreeRow(field_info *fi) {
 
 //        set_menu_sensitivity(ui_manager_main_menubar,
 //                             "/Menubar/GoMenu/GotoCorrespondingPacket", hfinfo->type == FT_FRAMENUM);
-
+        main_ui_->actionCopyAllVisibleItems->setEnabled(true);
+        main_ui_->actionCopyAllVisibleSelectedTreeItems->setEnabled(can_match_selected);
         main_ui_->actionEditCopyDescription->setEnabled(can_match_selected);
         main_ui_->actionEditCopyFieldName->setEnabled(can_match_selected);
         main_ui_->actionEditCopyValue->setEnabled(can_match_selected);
@@ -1240,6 +1242,11 @@ void MainWindow::setMenusForSelectedTreeRow(field_info *fi) {
         main_ui_->actionFileExportPacketBytes->setEnabled(false);
 //        set_menu_sensitivity(ui_manager_main_menubar,
 //                             "/Menubar/GoMenu/GotoCorrespondingPacket", FALSE);
+        if (capture_file_.capFile() != NULL)
+            main_ui_->actionCopyAllVisibleItems->setEnabled(true);
+        else
+            main_ui_->actionCopyAllVisibleItems->setEnabled(false);
+        main_ui_->actionCopyAllVisibleSelectedTreeItems->setEnabled(false);
         main_ui_->actionEditCopyDescription->setEnabled(false);
         main_ui_->actionEditCopyFieldName->setEnabled(false);
         main_ui_->actionEditCopyValue->setEnabled(false);
@@ -1669,6 +1676,18 @@ void MainWindow::on_actionFilePrint_triggered()
 
 // Edit Menu
 
+void MainWindow::recursiveCopyProtoTreeItems(QTreeWidgetItem *item, QString &clip, int ident_level) {
+    if (!item->isExpanded()) return;
+
+    for (int i_item = 0; i_item < item->childCount(); i_item += 1) {
+        clip.append(QString("    ").repeated(ident_level));
+        clip.append(item->child(i_item)->text(0));
+        clip.append("\n");
+
+        recursiveCopyProtoTreeItems(item->child(i_item), clip, ident_level + 1);
+    }
+}
+
 // XXX This should probably be somewhere else.
 void MainWindow::actionEditCopyTriggered(MainWindow::CopySelected selection_type)
 {
@@ -1696,6 +1715,22 @@ void MainWindow::actionEditCopyTriggered(MainWindow::CopySelected selection_type
             g_free(field_str);
         }
         break;
+    case CopyAllVisibleItems:
+        for (int i_item = 0; i_item < proto_tree_->topLevelItemCount(); i_item += 1) {
+            clip.append(proto_tree_->topLevelItem(i_item)->text(0));
+            clip.append("\n");
+
+            recursiveCopyProtoTreeItems(proto_tree_->topLevelItem(i_item), clip, 1);
+        }
+
+        break;
+    case CopyAllVisibleSelectedTreeItems:
+        clip.append(proto_tree_->currentItem()->text(0));
+        clip.append("\n");
+
+        recursiveCopyProtoTreeItems(proto_tree_->currentItem(), clip, 1);
+
+        break;
     }
 
     if (clip.length() == 0) {
@@ -1710,6 +1745,16 @@ void MainWindow::actionEditCopyTriggered(MainWindow::CopySelected selection_type
         QString err = tr("Couldn't copy text. Try another item.");
         main_ui_->statusBar->pushTemporaryStatus(err);
     }
+}
+
+void MainWindow::on_actionCopyAllVisibleItems_triggered()
+{
+    actionEditCopyTriggered(CopyAllVisibleItems);
+}
+
+void MainWindow::on_actionCopyAllVisibleSelectedTreeItems_triggered()
+{
+    actionEditCopyTriggered(CopyAllVisibleSelectedTreeItems);
 }
 
 void MainWindow::on_actionEditCopyDescription_triggered()
@@ -2856,6 +2901,32 @@ void MainWindow::on_actionCaptureRefreshInterfaces_triggered()
 }
 #endif
 
+void MainWindow::on_actionExternalMenuItem_triggered()
+{
+    QAction * triggerAction = NULL;
+    QVariant v;
+    ext_menubar_t * entry = NULL;
+
+    if ( QObject::sender() != NULL)
+    {
+        triggerAction = (QAction *)QObject::sender();
+        v = triggerAction->data();
+
+        if ( v.canConvert<void *>())
+        {
+            entry = (ext_menubar_t *)v.value<void *>();
+
+            if ( entry->type == EXT_MENUBAR_ITEM )
+            {
+                entry->callback(entry->user_data);
+            }
+            else
+            {
+                QDesktopServices::openUrl(QUrl(QString((gchar *)entry->user_data)));
+            }
+        }
+    }
+}
 
 /*
  * Editor modelines

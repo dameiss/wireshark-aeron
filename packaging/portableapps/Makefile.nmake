@@ -1,9 +1,9 @@
 #
 
-TOPDIR		= ..\..\..
+TOPDIR		= ..\..
 TOOLS_DIR	= $(TOPDIR)\tools
 
-include ../../../config.nmake
+include ../../config.nmake
 
 PROGRAM_PORTABLE	= $(PROGRAM_NAME)Portable
 
@@ -19,11 +19,6 @@ SOURCE		= $(OTHER)\Source
 APPINFO_INI	= $(APPINFO)\appinfo.ini
 LAUNCHER_INI	= $(LAUNCHER_DIR)\$(PROGRAM_PORTABLE).ini
 
-WSMANIFEST	= ../../wireshark.manifest
-
-NSIS_PLUGINS	= nsis-plugins
-FINDPROCDLL	= $(WIRESHARK_LIB_DIR)\$(NSIS_PLUGINS)\FindProcDLL.dll
-
 COPY		= xcopy
 MKDIR		= mkdir
 COPY_FLAGS	= /d /y
@@ -31,23 +26,21 @@ COPY_FLAGS	= /d /y
 WIN32_SETUP_OPT	= --download
 !ENDIF
 
-NSIS_DIR        = $(TOPDIR)\packaging\nsis
-
 # XXX This should be defined in config.nmake.
-!IF EXIST("..\..\wireshark-qt-release\wireshark.exe")
-QT_DIR		= "..\..\wireshark-qt-release"
+!IF EXIST("$(TOPDIR)\wireshark-qt-release\wireshark.exe")
+QT_DIR		= "$(TOPDIR)\wireshark-qt-release"
 !ENDIF
-!IF EXIST("..\..\wireshark-qt-release\Qt5Core.dll")
+!IF EXIST("$(TOPDIR)\wireshark-qt-release\Qt5Core.dll")
 NEED_QT5_DLL	= USE
 !ENDIF
-!IF EXIST("..\..\wireshark-qt-release\QtCore4.dll")
+!IF EXIST("$(TOPDIR)\wireshark-qt-release\QtCore4.dll")
 NEED_QT4_DLL	= USE
 !ENDIF
 
 UPX_FLAGS = -q
 
 PAPPS_VERSION=$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_MICRO).0
-PAPPS_PACKAGE=$(PROGRAM_PORTABLE)-$(VERSION).paf.exe
+PAPPS_PACKAGE=$(PROGRAM_PORTABLE)_$(VERSION).paf.exe
 
 all: package
 
@@ -76,8 +69,8 @@ dirs:
 #!ENDIF
 
 $(APPINFO_INI): dirs appinfo.tmpl $(TOPDIR)\config.nmake
-	sed -e 's/$$(PAPPS_VERSION)/$(PAPPS_VERSION)/g' \
-	    -e 's/$$(VERSION)/$(VERSION)/g' \
+	sed -e 's/@PORTABLEAPPS_PACKAGE_VERSION@/$(PAPPS_VERSION)/g' \
+	    -e 's/@VERSION@/$(VERSION)/g' \
 	< appinfo.tmpl > $@
 
 $(LAUNCHER_INI): dirs $(PROGRAM_PORTABLE).ini
@@ -97,7 +90,7 @@ applauncher: appinfo
 		$(MAKEDIR)\$(PROGRAM_PORTABLE)
 
 appbinaries: applauncher
-	xcopy $(TOPDIR)\wireshark-qt-release $(WIRESHARK_DIR) /D /I /E /Y
+	xcopy $(TOPDIR)\wireshark-qt-release $(WIRESHARK_DIR) /D /I /E /Y /exclude:xcopy-deploy-exclude.txt
 	xcopy $(TOPDIR)\capinfos.exe $(WIRESHARK_DIR) /d
 	xcopy $(TOPDIR)\captype.exe $(WIRESHARK_DIR) /d
 	xcopy $(TOPDIR)\dumpcap.exe $(WIRESHARK_DIR) /d
@@ -126,9 +119,9 @@ $(PAPPS_PACKAGE) : dirs appinfo appbinaries source
 !ENDIF
 
 clean:
-	cd ../../
+	cd ..
 	$(MAKE) -f Makefile.nmake $@
-	cd portableapps/win32
+	cd portableapps
 	rm -rf $(STAGING_DIR)
 	rm -rf appinfo.ini
 	rm -rf $(PAPPS_PACKAGE)

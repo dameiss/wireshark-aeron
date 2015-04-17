@@ -56,12 +56,12 @@ typedef struct MessageHeader {
   guint8 flags;			/* byte_order in 1.0 */
   guint8 message_type;
   guint32 message_size;
+
+  /* MSG dependent data */
+
   guint32 req_id;               /* request id in MSG  */
-
-  /* MSG dependant data */
-
   guint32 rep_status;           /* reply status in MSG if available */
-  gchar *exception_id;             /* exception string if a USER EXCEPTION occurs  */
+  gchar *exception_id;          /* exception string if a USER EXCEPTION occurs  */
 
 } MessageHeader;
 
@@ -606,5 +606,21 @@ typedef enum TCKind TCKind_t;
 #define IOP_ServiceId_INVOCATION_POLICIES               7
 #define IOP_ServiceId_FORWARD_IDENTITY                  8
 #define IOP_ServiceId_UnknownExceptionInfo              9
+
+/* Used for GIOP statistics */
+typedef struct _giop_info_value_t {
+  guint32      framenum;
+  address      *server_addr;
+  const gchar  *client_host;
+  const gchar  *service_host;
+  const gchar  *giop_op;
+  const gchar  *giop_resp;
+  time_t       time_ticks;
+  guint        time_ms;
+  gboolean     first_pass;
+} giop_info_value_t;
+
+
+#define GIOP_TAP_NAME "giop"
 
 #endif /* PACKET_GIOP_H */

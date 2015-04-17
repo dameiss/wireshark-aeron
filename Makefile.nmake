@@ -68,6 +68,9 @@ dftest_OBJECTS = $(dftest_SOURCES:.c=.obj)
 dumpcap_OBJECTS = $(dumpcap_SOURCES:.c=.obj)
 randpkt_OBJECTS = $(randpkt_SOURCES:.c=.obj)
 reordercap_OBJECTS = $(reordercap_SOURCES:.c=.obj)
+# this does not work because source file is in a subfolder of this makefile
+# and we end up recompiling systematically androiddump.c
+#androiddump_OBJECTS = $(androiddump_SOURCES:.c=.obj)
 
 #
 # psapi.lib see http://msdn.microsoft.com/en-us/library/windows/desktop/ms683219(v=vs.85).aspx
@@ -174,6 +177,11 @@ text2pcap_LIBS= \
 	wsutil\libwsutil.lib \
 	$(GLIB_LIBS)
 
+androiddump_LIBS= wiretap\wiretap-$(WTAP_VERSION).lib \
+	wsock32.lib user32.lib \
+	wsutil\libwsutil.lib \
+	$(GLIB_LIBS)
+
 dumpcap_LIBS= \
 	wsock32.lib user32.lib \
 	caputils\libcaputils.lib \
@@ -204,7 +212,7 @@ randpkt_LIBS= wiretap\wiretap-$(WTAP_VERSION).lib \
 
 EXECUTABLES=$(PROGRAM_NAME_GTK).exe tshark.exe tfshark.exe rawshark.exe \
 	capinfos.exe captype.exe editcap.exe mergecap.exe text2pcap.exe \
-	randpkt.exe reordercap.exe dumpcap.exe dftest.exe
+	randpkt.exe reordercap.exe dumpcap.exe androiddump.exe dftest.exe
 
 !IFDEF QT5_BASE_DIR
 EXECUTABLES=$(EXECUTABLES) $(PROGRAM_NAME).exe
@@ -236,9 +244,7 @@ packaging: _FORCE_
 packaging_papps: all
 	cd packaging
 	cd portableapps
-	cd win32
 	$(MAKE) /$(MAKEFLAGS) -f Makefile.nmake
-	cd ..
 	cd ..
 	cd ..
 
@@ -424,6 +430,15 @@ randpkt.exe	: $(randpkt_OBJECTS)
 	mt.exe -nologo -manifest "randpkt.exe.manifest" -outputresource:randpkt.exe;1
 !ENDIF
 
+androiddump.exe	: $(LIBS_CHECK) config.h androiddump.obj wsutil\libwsutil.lib wiretap\wiretap-$(WTAP_VERSION).lib
+	@echo Linking $@
+	$(LINK) @<<
+		/OUT:androiddump.exe $(conflags) $(conlibsdll) $(LDFLAGS) /SUBSYSTEM:WINDOWS androiddump.obj $(androiddump_LIBS)
+<<
+!IFDEF MANIFEST_INFO_REQUIRED
+	mt.exe -nologo -manifest "androiddump.exe.manifest" -outputresource:androiddump.exe;1
+!ENDIF
+
 dumpcap.exe	: $(LIBS_CHECK) config.h $(dumpcap_OBJECTS) caputils wsutil\libwsutil.lib image\dumpcap.res
 	@echo Linking $@
 	$(LINK) @<<
@@ -522,6 +537,8 @@ PYTHON = $(PYTHON)
 MSVC_VARIANT = $(MSVC_VARIANT)
 MSVCR_DLL = "$(MSVCR_DLL:\=/)"
 
+WIRESHARK_TARGET_PLATFORM = $(WIRESHARK_TARGET_PLATFORM)
+
 QMAKE_CFLAGS         *= $(STANDARD_CFLAGS)
 # NOMINMAX keeps windows.h from defining "min" and "max" via windef.h.
 # This avoids conflicts with the C++ standard library.
@@ -553,6 +570,9 @@ text2pcap-scanner.c : text2pcap-scanner.l
 text2pcap-scanner.obj : text2pcap-scanner.c
 	$(CC) $(GENERATED_CFLAGS) -Fd.\ -c $?
 
+androiddump.obj : extcap/androiddump.c
+	$(CC) $(CFLAGS) -Fd.\ -c $?
+
 test-programs:
 	cd epan
 	$(MAKE) /$(MAKEFLAGS) -f Makefile.nmake test-programs
@@ -561,6 +581,7 @@ test-programs:
 clean-local:
 	rm -f $(wireshark_gtk_OBJECTS) $(tshark_OBJECTS) $(tfshark_OBJECTS) $(dumpcap_OBJECTS) $(rawshark_OBJECTS) \
 		$(EXECUTABLES) *.nativecodeanalysis.xml *.pdb *.sbr *.exe.manifest \
+		androiddump.obj \
 		capinfos.obj capinfos.exp capinfos.lib \
 		captype.obj captype.exp captype.lib \
 		editcap.obj editcap.exp editcap.lib \
@@ -617,9 +638,9 @@ clean: clean-local
 	$(MAKE) /$(MAKEFLAGS) -f Makefile.nmake clean
 	cd ../packaging/nsis
 	$(MAKE) /$(MAKEFLAGS) -f Makefile.nmake clean
-	cd ../portableapps/win32
+	cd ../portableapps
 	$(MAKE) /$(MAKEFLAGS) -f Makefile.nmake clean
-	cd ../../..
+	cd ../..
 
 # "distclean" removes all files not part of the distribution.
 # It does not remove generated files that are part of the distribution.
@@ -673,9 +694,9 @@ distclean: distclean-local
 	$(MAKE) /$(MAKEFLAGS) -f Makefile.nmake distclean
 	cd ../packaging/nsis
 	$(MAKE) /$(MAKEFLAGS) -f Makefile.nmake distclean
-	cd ../portableapps/win32
+	cd ../portableapps
 	$(MAKE) /$(MAKEFLAGS) -f Makefile.nmake distclean
-	cd ../../..
+	cd ../..
 
 # Make "maintainer-clean" only if you would like to remove ALL generated
 # files.
@@ -722,9 +743,9 @@ maintainer-clean: maintainer-clean-local
 	$(MAKE) /$(MAKEFLAGS) -f Makefile.nmake maintainer-clean
 	cd ../packaging/nsis
 	$(MAKE) /$(MAKEFLAGS) -f Makefile.nmake maintainer-clean
-	cd ../portableapps/win32
+	cd ../portableapps
 	$(MAKE) /$(MAKEFLAGS) -f Makefile.nmake maintainer-clean
-	cd ../../..
+	cd ../..
 
 tools::
 	cd tools
@@ -1151,6 +1172,7 @@ clean_setup:
 	rm -r -f zlib123
 	rm -r -f zlib125
 	rm -r -f zlib-1.2.5
+	rm -r -f zlib-1.2.8
 	rm -r -f zlib123-dll
 	rm -r -f AirPcap_Devpack_1_0_0_594
 	rm -r -f AirPcap_Devpack_4_0_0_1480
@@ -1207,6 +1229,12 @@ install-generated-files: doc
 	if exist $(PROGRAM_NAME_GTK).pdb xcopy $(PROGRAM_NAME_GTK).pdb $(INSTALL_DIR) /d
 	if exist $(PROGRAM_NAME_GTK).bsc xcopy $(PROGRAM_NAME_GTK).bsc $(INSTALL_DIR) /d
 	if exist ".\docbook\user-guide.chm" xcopy ".\docbook\user-guide.chm" $(INSTALL_DIR) /d
+	if not exist $(INSTALL_DIR)\extcap mkdir $(INSTALL_DIR)\extcap
+	if exist androiddump.exe xcopy androiddump.exe $(INSTALL_DIR)\extcap /d
+	if exist androiddump.pdb xcopy androiddump.pdb $(INSTALL_DIR)\extcap /d
+	if not exist $(INSTALL_DIR_QT)\extcap mkdir $(INSTALL_DIR_QT)\extcap
+	if exist androiddump.exe xcopy androiddump.exe $(INSTALL_DIR_QT)\extcap /d
+	if exist androiddump.pdb xcopy androiddump.pdb $(INSTALL_DIR_QT)\extcap /d
 	if exist capinfos.exe xcopy capinfos.exe $(INSTALL_DIR) /d
 	if exist capinfos.pdb xcopy capinfos.pdb $(INSTALL_DIR) /d
 	if exist captype.exe xcopy captype.exe $(INSTALL_DIR) /d

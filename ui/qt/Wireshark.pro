@@ -466,6 +466,8 @@ win32 {
         ../../epan/libwireshark.dll ../../wiretap/wiretap-$${WTAP_VERSION}.dll ../../wsutil/libwsutil.dll \
         $${GLIB_DIR}/bin/libglib-2.0-0.dll $${GLIB_DIR}/bin/libgmodule-2.0-0.dll \
         $${GLIB_DIR}/bin/$${INTL_DLL} \
+        $${GLIB_DIR}/bin/gspawn-$${WIRESHARK_TARGET_PLATFORM}-helper.exe \
+        $${GLIB_DIR}/bin/gspawn-$${WIRESHARK_TARGET_PLATFORM}-helper-console.exe \
         $${C_ARES_DIR}/bin/libcares-2.dll $${ZLIB_DIR}/zlib1.dll \
         $${GNUTLS_DIR}/bin/libffi-6.dll $${GNUTLS_DIR}/bin/$${GCC_DLL} \
         $${GNUTLS_DIR}/bin/libgcrypt-20.dll $${GNUTLS_DIR}/bin/libgmp-10.dll \

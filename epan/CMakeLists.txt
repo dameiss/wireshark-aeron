@@ -393,6 +393,7 @@ set(DISSECTOR_SRC
 	dissectors/packet-asterix.c
 	dissectors/packet-at.c
 	dissectors/packet-atalk.c
+	dissectors/packet-ath.c
 	dissectors/packet-atm.c
 	dissectors/packet-atmtcp.c
 	dissectors/packet-auto_rp.c
@@ -707,6 +708,7 @@ set(DISSECTOR_SRC
 	dissectors/packet-gearman.c
 	dissectors/packet-ged125.c
 	dissectors/packet-geneve.c
+	dissectors/packet-gias.c
 	dissectors/packet-gift.c
 	dissectors/packet-giop.c
 	dissectors/packet-git.c
@@ -1592,6 +1594,7 @@ set(LIBWIRESHARK_FILES
 	except.c
 	expert.c
 	exported_pdu.c
+	ext_menubar.c
 	filter_expressions.c
 	follow.c
 	frame_data.c

@@ -1854,6 +1854,13 @@ static const value_string ieee80211_tag_measure_request_noise_histogram_sub_repo
   { 0x00, NULL}
 };
 
+#define MEASURE_REP_REPORTED_FRAME_BODY 1
+
+static const value_string ieee80211_tag_measure_report_beacon_sub_id_vals[] = {
+  { MEASURE_REP_REPORTED_FRAME_BODY, "Reported Frame Body" },
+  { 221, "Vendor Specific" },
+  { 0x00, NULL}
+};
 
 static const value_string frame_type[] = {
   {MGT_FRAME,       "Management frame"},
@@ -4109,6 +4116,9 @@ static int hf_ieee80211_tag_measure_report_ipi_density_9 = -1;
 static int hf_ieee80211_tag_measure_report_ipi_density_10 = -1;
 static int hf_ieee80211_tag_measure_report_parent_tsf = -1;
 
+static int hf_ieee80211_tag_measure_report_subelement_length = -1;
+static int hf_ieee80211_tag_measure_report_beacon_sub_id = -1;
+
 static int hf_ieee80211_tag_measure_report_unknown = -1;
 
 static int hf_ieee80211_tag_quiet_count = -1;
@@ -5167,6 +5177,7 @@ static gint ett_tag_measure_report_type_tree = -1;
 static gint ett_tag_measure_report_basic_map_tree = -1;
 static gint ett_tag_measure_report_rpi_tree = -1;
 static gint ett_tag_measure_report_frame_tree = -1;
+static gint ett_tag_measure_reported_frame_tree = -1;
 static gint ett_tag_bss_bitmask_tree = -1;
 static gint ett_tag_dfs_map_tree = -1;
 static gint ett_tag_erp_info_tree = -1;
@@ -12279,6 +12290,8 @@ static int dissect_tfs_request(packet_info *pinfo, proto_tree *tree,
       s_end = offset + len;
       while (s_offset < s_end) {
         int tlen = add_tagged_field(pinfo, tree, tvb, s_offset, ftype);
+        if (tlen==0)
+          break;
         s_offset += tlen;
       }
       break;
@@ -12346,6 +12359,8 @@ static int dissect_tfs_response(packet_info *pinfo, proto_tree *tree,
       s_end = offset + len;
       while (s_offset < s_end) {
         int tlen = add_tagged_field(pinfo, tree, tvb, s_offset, ftype);
+        if (tlen==0)
+          break;
         s_offset += tlen;
       }
       break;
@@ -14885,7 +14900,39 @@ add_tagged_field(packet_info *pinfo, proto_tree *tree, tvbuff_t *tvb, int offset
 
             proto_tree_add_item(sub_tree, hf_ieee80211_tag_measure_report_parent_tsf, tvb, offset, 4, ENC_LITTLE_ENDIAN);
             offset += 4;
-            /* TODO Add Optional Subelements */
+
+            while (offset < tag_end)
+            {
+              guint8 sub_id, sub_length;
+              proto_tree_add_item(sub_tree, hf_ieee80211_tag_measure_report_beacon_sub_id, tvb, offset, 1, ENC_NA);
+              sub_id = tvb_get_guint8(tvb, offset);
+              offset += 1;
+
+              proto_tree_add_item(sub_tree, hf_ieee80211_tag_measure_report_subelement_length, tvb, offset, 1, ENC_NA);
+              sub_length = tvb_get_guint8(tvb, offset);
+              offset += 1;
+
+              switch (sub_id) {
+                case MEASURE_REP_REPORTED_FRAME_BODY: /* Reported Frame Body (1) */
+                  {
+                    proto_tree *rep_tree;
+
+                    rep_tree = proto_tree_add_subtree(sub_tree, tvb, offset, sub_length, ett_tag_measure_reported_frame_tree, NULL, "Reported Frame Body");
+
+                    add_fixed_field(rep_tree, tvb, pinfo, 0, FIELD_TIMESTAMP);
+                    add_fixed_field(rep_tree, tvb, pinfo, 8, FIELD_BEACON_INTERVAL);
+                    add_fixed_field(rep_tree, tvb, pinfo, 10, FIELD_CAP_INFO);
+                    offset += 12;
+
+                    ieee_80211_add_tagged_parameters (tvb, offset, pinfo, rep_tree, sub_length - 12, MGT_PROBE_RESP);
+                    offset += (sub_length - 12);
+                  }
+                  break;
+                default:
+                  /* no default action */
+                  break;
+              }
+            }
             break;
           }
           case 6: /* Frame Report */
@@ -15925,7 +15972,7 @@ add_tagged_field(packet_info *pinfo, proto_tree *tree, tvbuff_t *tvb, int offset
       if (tag_len != 8)
       {
         expert_add_info_format(pinfo, ti_len, &ei_ieee80211_tag_length, "Tag Length %u wrong, must be 8", tag_len);
-        return tag_len;
+        break;
       }
       offset += 2;
       proto_tree_add_item(tree, hf_ieee80211_tag_bi_start_time, tvb, offset, 4, ENC_NA);
@@ -15943,7 +15990,7 @@ add_tagged_field(packet_info *pinfo, proto_tree *tree, tvbuff_t *tvb, int offset
       if (tag_len < 14)
       {
         expert_add_info_format(pinfo, ti_len, &ei_ieee80211_tag_length, "Tag Length %u wrong, must be at least 14", tag_len);
-        return tag_len;
+        break;
       }
       offset += 2;
       proto_tree_add_item(tree, hf_ieee80211_tag_tspec_allocation_id, tvb, offset, 3, ENC_NA);
@@ -15989,7 +16036,7 @@ add_tagged_field(packet_info *pinfo, proto_tree *tree, tvbuff_t *tvb, int offset
       if (tag_len%5 != 0)
       {
         expert_add_info_format(pinfo, ti_len, &ei_ieee80211_tag_length, "Tag Length %u wrong, must be multiple of 5", tag_len);
-        return tag_len;
+        break;
       }
       num_measurement = tvb_get_guint8(tvb, offset+1);
       offset += 2;
@@ -16014,7 +16061,7 @@ add_tagged_field(packet_info *pinfo, proto_tree *tree, tvbuff_t *tvb, int offset
       if (tag_len != 2)
       {
         expert_add_info_format(pinfo, ti_len, &ei_ieee80211_tag_length, "Tag Length %u wrong, must be 2", tag_len);
-        return tag_len;
+        break;
       }
       offset += 2;
       proto_tree_add_item(tree, hf_ieee80211_tag_awake_window, tvb, offset, 2, ENC_NA);
@@ -16026,7 +16073,7 @@ add_tagged_field(packet_info *pinfo, proto_tree *tree, tvbuff_t *tvb, int offset
       if (tag_len != 1)
       {
         expert_add_info_format(pinfo, ti_len, &ei_ieee80211_tag_length, "Tag Length %u wrong, must be 1", tag_len);
-        return tag_len;
+        break;
       }
       offset += 2;
       proto_tree_add_item(tree, hf_ieee80211_tag_addba_ext_no_frag, tvb, offset, 1, ENC_NA);
@@ -16039,7 +16086,7 @@ add_tagged_field(packet_info *pinfo, proto_tree *tree, tvbuff_t *tvb, int offset
       if (tag_len < 22)
       {
         expert_add_info_format(pinfo, ti_len, &ei_ieee80211_tag_length, "Tag Length %u wrong, must be at least 22", tag_len);
-        return tag_len;
+        break;
       }
       offset += 2;
       chiper_present = (tvb_get_letohs(tvb, offset) & 0x08) >> 3;
@@ -16114,7 +16161,7 @@ add_tagged_field(packet_info *pinfo, proto_tree *tree, tvbuff_t *tvb, int offset
       if (tag_len != 8)
       {
         expert_add_info_format(pinfo, ti_len, &ei_ieee80211_tag_length, "Tag Length %u wrong, must be 8", tag_len);
-        return tag_len;
+        break;
       }
       offset += 2;
       proto_tree_add_item(tree, hf_ieee80211_tag_activity, tvb, offset, 1, ENC_NA);
@@ -16134,7 +16181,7 @@ add_tagged_field(packet_info *pinfo, proto_tree *tree, tvbuff_t *tvb, int offset
       if (tag_len != 5)
       {
         expert_add_info_format(pinfo, ti_len, &ei_ieee80211_tag_length, "Tag Length %u wrong, must be 5", tag_len);
-        return tag_len;
+        break;
       }
       offset += 2;
       proto_tree_add_item(tree, hf_ieee80211_tag_activity, tvb, offset, 1, ENC_NA);
@@ -16149,7 +16196,7 @@ add_tagged_field(packet_info *pinfo, proto_tree *tree, tvbuff_t *tvb, int offset
       if (tag_len < 4)
       {
         expert_add_info_format(pinfo, ti_len, &ei_ieee80211_tag_length, "Tag Length %u wrong, must be at least 4", tag_len);
-        return tag_len;
+        break;
       }
       offset += 2;
       offset += add_fixed_field(tree, tvb, pinfo, 1, FIELD_BAND_ID);
@@ -16453,15 +16500,13 @@ dissect_ieee80211_mgt (guint16 fcf, tvbuff_t *tvb, packet_info *pinfo, proto_tre
 
       proto_tree_add_item(aruba_tree, hf_ieee80211_aruba, tvb, offset, 2, ENC_BIG_ENDIAN);
       offset += 2;
-      /* HeartBeat Sequence */
-      if (type == 0x0005)
-      {
-        proto_tree_add_item(aruba_tree, hf_ieee80211_aruba_hb_seq, tvb, offset, 8, ENC_BIG_ENDIAN);
-      }
-      /* MTU Size */
-      if (type == 0x0003)
-      {
-        proto_tree_add_item(aruba_tree, hf_ieee80211_aruba_mtu, tvb, offset, 2, ENC_BIG_ENDIAN);
+      switch(type){
+        case 0x0003: /* MTU Size */
+          proto_tree_add_item(aruba_tree, hf_ieee80211_aruba_mtu, tvb, offset, 2, ENC_BIG_ENDIAN);
+        break;
+        case 0x0005: /* HeartBeat Sequence */
+          proto_tree_add_item(aruba_tree, hf_ieee80211_aruba_hb_seq, tvb, offset, 8, ENC_BIG_ENDIAN);
+        break;
       }
       break;
     }
@@ -24530,6 +24575,16 @@ proto_register_ieee80211 (void)
       FT_UINT32, BASE_HEX, NULL, 0,
       NULL, HFILL }},
 
+    {&hf_ieee80211_tag_measure_report_subelement_length,
+     {"Length", "wlan_mgt.measure.req.sub.length",
+      FT_UINT8, BASE_DEC, NULL, 0,
+      NULL, HFILL }},
+
+    {&hf_ieee80211_tag_measure_report_beacon_sub_id,
+     {"SubElement ID", "wlan_mgt.measure.req.beacon.sub.id",
+      FT_UINT8, BASE_DEC, VALS(ieee80211_tag_measure_report_beacon_sub_id_vals), 0,
+      NULL, HFILL }},
+
     {&hf_ieee80211_tag_measure_report_unknown,
      {"Unknown Data", "wlan_mgt.measure.rep.unknown",
       FT_BYTES, BASE_NONE, NULL, 0,
@@ -26669,6 +26724,7 @@ proto_register_ieee80211 (void)
     &ett_tag_measure_report_basic_map_tree,
     &ett_tag_measure_report_rpi_tree,
     &ett_tag_measure_report_frame_tree,
+    &ett_tag_measure_reported_frame_tree,
     &ett_tag_bss_bitmask_tree,
     &ett_tag_dfs_map_tree,
     &ett_tag_erp_info_tree,

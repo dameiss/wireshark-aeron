@@ -21,7 +21,13 @@
 
 project(Wireshark C CXX)
 
-cmake_minimum_required(VERSION 2.8.3)
+if(WIN32)
+	# Needed for proper Qt linking. See
+	# http://www.cmake.org/cmake/help/v3.0/policy/CMP0020.html
+	cmake_minimum_required(VERSION 2.8.11)
+else()
+	cmake_minimum_required(VERSION 2.8.3)
+endif()
 
 # Needs to be set after cmake_minimum_required or cmake_policy(VERSION)
 # Policy since 2.6.1
@@ -32,26 +38,66 @@ cmake_policy(SET CMP0011 OLD)
 # Policy since 2.8.1
 cmake_policy(SET CMP0015 NEW)
 
+#Where to find local cmake scripts
+set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/modules)
+
 # If our target platform is enforced by our generator, set
 # WIRESHARK_TARGET_PLATFORM accordingly. Otherwise use
 # %WIRESHARK_TARGET_PLATFORM%.
 
 if(WIN32)
-	if("${CMAKE_GENERATOR}" MATCHES ".*Win64$")
+	find_package(PowerShell REQUIRED)
+
+	if("${CMAKE_GENERATOR}" MATCHES "Win64")
 		set(WIRESHARK_TARGET_PLATFORM win64)
 		set(PROCESSOR_ARCHITECTURE amd64)
 		message("Building for x64")
-	elseif("${CMAKE_GENERATOR}" MATCHES "Visual Studio.*")
+	elseif("${CMAKE_GENERATOR}" MATCHES "Visual Studio")
 		set(WIRESHARK_TARGET_PLATFORM win32)
 		set(PROCESSOR_ARCHITECTURE x86)
 		message("Building for x86")
 	else()
 		set(WIRESHARK_TARGET_PLATFORM $ENV{WIRESHARK_TARGET_PLATFORM})
 	endif()
-endif(WIN32)
 
-#Where to find local cmake scripts
-set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/modules)
+	# Sanity check
+	if(DEFINED ENV{PLATFORM})
+		string(TOLOWER $ENV{PLATFORM} _vs_platform)
+	else()
+		set(_vs_platform "[undefined]") # x86
+	endif()
+	if(
+		(_vs_platform STREQUAL "x64" AND NOT WIRESHARK_TARGET_PLATFORM STREQUAL "win64")
+		OR
+		(_vs_platform STREQUAL "[undefined]" AND NOT WIRESHARK_TARGET_PLATFORM STREQUAL "win32")
+	)
+		message(FATAL_ERROR "The PLATFORM environment variable (${_vs_platform})"
+			" doesn't match the generator platform (${WIRESHARK_TARGET_PLATFORM})")
+	endif()
+
+	# Download third-party libraries
+	file (TO_NATIVE_PATH ${CMAKE_SOURCE_DIR}/tools/win-setup.ps1 _win_setup)
+	file (TO_NATIVE_PATH "$ENV{WIRESHARK_BASE_DIR}/wireshark-${WIRESHARK_TARGET_PLATFORM}-libs" _ws_lib_dir)
+	if(MSVC12)
+		set(_vsversion_args "-VSVersion 12")
+	elseif(MSVC11)
+		set(_vsversion_args "-VSVersion 11")
+	elseif(MSVC10)
+		set(_vsversion_args "-VSVersion 10")
+	endif()
+	# Is it possible to have a one-time, non-cached option in CMake? If
+	# so, we could add a "-DFORCE_WIN_SETUP" which passes -Force to
+	# win-setup.ps1.
+	execute_process(
+		COMMAND ${POWERSHELL_COMMAND} "${_win_setup}" -Destination "${_ws_lib_dir}" -Platform ${WIRESHARK_TARGET_PLATFORM} ${_vsversion_args}
+		RESULT_VARIABLE _win_setup_failed
+	)
+	if (${_win_setup_failed})
+		message(FATAL_ERROR "Windows setup (win-setup.ps1) failed.")
+	endif()
+
+	# XXX Add a dependency on ${_ws_lib_dir}/current_tag.txt?
+endif(WIN32)
 
 include(UseCustomIncludes)
 ADD_CUSTOM_CMAKE_INCLUDE()
@@ -494,9 +540,11 @@ foreach(THIS_FLAG ${WIRESHARK_LD_FLAGS})
 endforeach()
 
 if(ENABLE_STATIC)
+	set(BUILD_SHARED_LIBS 0)
 	set(LINK_MODE_LIB STATIC)
 	set(LINK_MODE_MODULE STATIC)
 else()
+	set(BUILD_SHARED_LIBS 1)
 	set(LINK_MODE_LIB SHARED)
 	set(LINK_MODE_MODULE MODULE)
 endif()
@@ -526,10 +574,7 @@ set(PythonInterp_FIND_VERSION 2)
 set(Python_ADDITIONAL_VERSIONS 3)
 set(YACC_REQUIRED TRUE)
 
-if (WIN32)
-	set(PACKAGELIST ${PACKAGELIST} PowerShell)
-	set(PowerShell_REQUIRED TRUE)
-else()
+if (NOT WIN32)
 	set(M_REQUIRED TRUE)
 endif()
 
@@ -620,6 +665,25 @@ endif()
 
 # Zlib compression
 if(ENABLE_ZLIB)
+	if (WIN32)
+		# On Windows we build our own version of zlib, so add the paths
+		if( DEFINED ENV{WIRESHARK_LIB_DIR} )
+			# The buildbots set WIRESHARK_LIB_DIR but not WIRESHARK_BASE_DIR.
+			file( TO_CMAKE_PATH "$ENV{WIRESHARK_LIB_DIR}" _PROJECT_LIB_DIR )
+		else()
+			file( TO_CMAKE_PATH "$ENV{WIRESHARK_BASE_DIR}" _WS_BASE_DIR )
+			set( _PROJECT_LIB_DIR "${_WS_BASE_DIR}/wireshark-${WIRESHARK_TARGET_PLATFORM}-libs" )
+		endif()
+		set(ZLIB_SRC_DIR "${_PROJECT_LIB_DIR}/zlib-1.2.8")
+		add_subdirectory("${ZLIB_SRC_DIR}" "${CMAKE_BINARY_DIR}/zlib")
+		set(ZLIB_INCLUDE_DIR  "${ZLIB_SRC_DIR}" "${CMAKE_BINARY_DIR}/zlib")
+		set(ZLIB_LIBRARY zlib)
+		# Annoyingly zlib also builds some other stuff we aren't interested in
+		set_target_properties(zlib PROPERTIES FOLDER "Libs/zlib")
+		set_target_properties(zlibstatic PROPERTIES FOLDER "Libs/zlib")
+		set_target_properties(example PROPERTIES FOLDER "Libs/zlib")
+		set_target_properties(minigzip PROPERTIES FOLDER "Libs/zlib")
+	endif()
 	set(PACKAGELIST ${PACKAGELIST} ZLIB)
 endif()
 
@@ -676,8 +740,6 @@ foreach(PACKAGE ${PACKAGELIST})
 		set(PACKAGE_VAR "HTML_VIEWER")
 	elseif(${PACKAGE} STREQUAL "Perl")
 		set(PACKAGE_VAR "PERL")
-	elseif(${PACKAGE} STREQUAL "PowerShell")
-		set(PACKAGE_VAR "POWERSHELL")
 	else()
 		set(PACKAGE_VAR ${PACKAGE})
 	endif()
@@ -748,6 +810,9 @@ if(HAVE_LIBNL AND HAVE_AIRPCAP)
 endif()
 if(HAVE_LIBSBC)
 	set(HAVE_SBC 1)
+endif()
+if(EXTCAP_ANDROIDDUMP_LIBPCAP)
+	set(ANDROIDDUMP_USE_LIBPCAP 1)
 endif()
 
 if (HAVE_LIBWINSPARKLE)
@@ -879,17 +944,18 @@ if(ENABLE_EXTCAP)
 	set(EXTCAP_DIR "${DATAFILE_DIR}/extcap/")
 endif()
 
+if(IS_ABSOLUTE ${CMAKE_INSTALL_LIBDIR})
+  set(ABSOLUTE_CMAKE_INSTALL_LIBDIR "${CMAKE_INSTALL_LIBDIR}")
+else()
+  set(ABSOLUTE_CMAKE_INSTALL_LIBDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+endif()
 # Location of our plugins. PLUGIN_DIRECTORY should allow running
 # from the build directory similar to DATAFILE_DIR above.
 if(ENABLE_PLUGINS)
 	set(HAVE_PLUGINS 1)
 	add_custom_target(plugins)
 	set_target_properties(plugins PROPERTIES FOLDER "Plugins")
-	if(IS_ABSOLUTE ${CMAKE_INSTALL_LIBDIR})
-		set(PLUGIN_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/@CPACK_PACKAGE_NAME@/plugins/${CPACK_PACKAGE_VERSION}")
-	else()
-		set(PLUGIN_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/@CPACK_PACKAGE_NAME@/plugins/${CPACK_PACKAGE_VERSION}")
-	endif()
+	set(PLUGIN_INSTALL_DIR "${ABSOLUTE_CMAKE_INSTALL_LIBDIR}/@CPACK_PACKAGE_NAME@/plugins/${CPACK_PACKAGE_VERSION}")
 	set(PLUGIN_SRC_DIRS
 		plugins/docsis
 		plugins/ethercat
@@ -1096,6 +1162,7 @@ set(INSTALL_DIRS
 )
 
 set(INSTALL_FILES
+	${CMAKE_BINARY_DIR}/androiddump.html
 	${CMAKE_BINARY_DIR}/AUTHORS-SHORT
 	${CMAKE_BINARY_DIR}/capinfos.html
 	${CMAKE_BINARY_DIR}/captype.html
@@ -1105,6 +1172,7 @@ set(INSTALL_FILES
 	${CMAKE_BINARY_DIR}/dftest.html
 	${CMAKE_BINARY_DIR}/dumpcap.html
 	${CMAKE_BINARY_DIR}/editcap.html
+	${CMAKE_BINARY_DIR}/extcap.html
 	${CMAKE_BINARY_DIR}/asn2deb.html
 	${CMAKE_BINARY_DIR}/idl2deb.html
 	${CMAKE_BINARY_DIR}/idl2wrs.html
@@ -1134,11 +1202,13 @@ else()
 endif()
 
 set(MAN1_FILES
+	${CMAKE_BINARY_DIR}/androiddump.1
 	${CMAKE_BINARY_DIR}/capinfos.1
 	${CMAKE_BINARY_DIR}/captype.1
 	${CMAKE_BINARY_DIR}/dftest.1
 	${CMAKE_BINARY_DIR}/dumpcap.1
 	${CMAKE_BINARY_DIR}/editcap.1
+	${CMAKE_BINARY_DIR}/extcap.4
 	${CMAKE_BINARY_DIR}/idl2wrs.1
 	${CMAKE_BINARY_DIR}/mergecap.1
 	${CMAKE_BINARY_DIR}/randpkt.1
@@ -1192,22 +1262,33 @@ if(WIN32)
 	# XXX Can (and should) we iterate over these similar to the way
 	# the top-level CMakeLists.txt iterates over the package list?
 
-	# Required
-	foreach( _dll ${GLIB2_DLLS} )
+	# Required DLLs.
+	# The cairo, freetype, gio, gnutls, png, and other OBS-generated DLLs
+	# depend on zlib1.dll. We compile zlib locally but the Debug
+	# configuration (the default) creates zlibd1.dll.
+	file (TO_NATIVE_PATH "${_dll_output_dir}" _dll_output_dir_win )
+	foreach( _dll ${GLIB2_DLLS} $<$<CONFIG:Debug>:zlib1.dll> )
 		add_custom_command(TARGET copy_cli_dlls PRE_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different
-				"${GLIB2_DLL_DIR}/${_dll}"
-				"${_dll_output_dir}"
+			# It would be really handy if copy, xcopy, or "cmake
+			# -E copy_if_different" supported multiple files
+			# separated by whitespace, or if robocpy had a sane
+			# notion of exit codes.
+			COMMAND if exist \"${_dll}\" xcopy ${_dll} "${_dll_output_dir_win}" /D /Y
+			WORKING_DIRECTORY "${GLIB2_DLL_DIR}"
 		)
 	endforeach(_dll)
+
+
+	# Don't overwrite an exe if it's already there. We don't want to
+	# clobber any previous code signing.
 	file(GLOB _gspawn_helpers
+		RELATIVE "${GLIB2_DLL_DIR}"
 		"${GLIB2_DLL_DIR}/gspawn*.exe"
 	)
 	foreach(_gspawn_helper ${_gspawn_helpers})
 		add_custom_command(TARGET copy_cli_dlls PRE_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different
-				"${_gspawn_helper}"
-				"${_dll_output_dir}"
+			COMMAND if not exist \"${_dll_output_dir_win}\\${_gspawn_helper}\" xcopy ${_gspawn_helper} "${_dll_output_dir_win}" /D /Y
+			WORKING_DIRECTORY "${GLIB2_DLL_DIR}"
 		)
 	endforeach()
 
@@ -1306,13 +1387,6 @@ if(WIN32)
 				"${_dll_output_dir}"
 		)
 	endif(WINSPARKLE_FOUND)
-	if (ZLIB_FOUND)
-		add_custom_command(TARGET copy_cli_dlls PRE_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different
-				"${ZLIB_DLL_DIR}/${ZLIB_DLL}"
-				"${_dll_output_dir}"
-		)
-	endif(ZLIB_FOUND)
 
 	add_dependencies(epan copy_cli_dlls)
 
@@ -1600,10 +1674,10 @@ if(BUILD_wireshark AND QT_FOUND)
 
 	# Policy since 2.8.11
 	if (POLICY CMP0020)
-		cmake_policy(SET CMP0020 OLD)
+		cmake_policy(SET CMP0020 NEW)
 	endif()
 
-	add_executable(wireshark MACOSX_BUNDLE wireshark-qt.cpp ${wireshark_FILES} ${EXTRA_BUNDLE_FILES})
+	add_executable(wireshark WIN32 MACOSX_BUNDLE wireshark-qt.cpp ${wireshark_FILES} ${EXTRA_BUNDLE_FILES})
 	set(PROGLIST ${PROGLIST} wireshark)
 	set_target_properties(wireshark PROPERTIES LINK_FLAGS "${WS_LINK_FLAGS}")
 	set_target_properties(wireshark PROPERTIES FOLDER "Executables")
@@ -1701,6 +1775,25 @@ macro(set_extra_executable_properties _executable _folder)
 	endif()
 endmacro()
 
+macro(set_extcap_executable_properties _executable)
+	set_target_properties(androiddump PROPERTIES FOLDER "Executables/Extcaps")
+
+	set(PROGLIST ${PROGLIST} ${_executable})
+
+	if(WIN32)
+		set_target_properties(${_executable} PROPERTIES
+			LINK_FLAGS "${WS_LINK_FLAGS}"
+			RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/run/extcap
+			RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/run/Debug/extcap
+			RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/run/Release/extcap
+			RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL ${CMAKE_BINARY_DIR}/run/MinSizeRel/extcap
+			RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR}/run/RelWithDebInfo/extcap
+		)
+	else()
+		set_target_properties(${_executable} PROPERTIES LINK_FLAGS "${WS_LINK_FLAGS}")
+	endif()
+endmacro()
+
 if(BUILD_wireshark_gtk AND GTK_FOUND)
 	set(wireshark_gtk_LIBS
 		gtkui
@@ -1721,7 +1814,7 @@ if(BUILD_wireshark_gtk AND GTK_FOUND)
 	)
 	# wireshark and wireshark-gtk share wireshark_FILES
 
-	add_executable(wireshark-gtk ${wireshark_FILES})
+	add_executable(wireshark-gtk WIN32 ${wireshark_FILES})
 	set(PROGLIST ${PROGLIST} wireshark-gtk)
 	set_target_properties(wireshark-gtk PROPERTIES LINK_FLAGS "${WS_LINK_FLAGS}")
 	set_target_properties(wireshark-gtk PROPERTIES FOLDER "Executables")
@@ -2075,6 +2168,44 @@ if (WIN32)
 		ADD_NSIS_UNINSTALLER_TARGET()
 		ADD_NSIS_PACKAGE_TARGET()
 	endif()
+
+	find_package( PortableApps )
+	if (
+		NOT "${PORTABLEAPPS_LAUNCHER_GENERATOR_EXECUTABLE}" STREQUAL "PORTABLEAPPS_LAUNCHER_GENERATOR_EXECUTABLE-NOTFOUND"
+		AND
+		NOT "${PORTABLEAPPS_INSTALLER_EXECUTABLE}" STREQUAL "PORTABLEAPPS_INSTALLER_EXECUTABLE-NOTFOUND"
+	)
+		add_subdirectory( packaging/portableapps EXCLUDE_FROM_ALL )
+		ADD_PORTABLEAPPS_PACKAGE_TARGET()
+	endif()
+endif()
+
+if(BUILD_androiddump)
+	if(EXTCAP_ANDROIDDUMP_LIBPCAP)
+		if(HAVE_LIBPCAP)
+			set(androiddump_LIBS
+				${GLIB2_LIBRARIES}
+				${PCAP_LIBRARIES}
+			)
+		else()
+			message(FATAL_ERROR "You try to build androiddump with libpcap but do not have it")
+		endif()
+	else()
+		set(androiddump_LIBS
+			wiretap
+			${GLIB2_LIBRARIES}
+			${CMAKE_DL_LIBS}
+		)
+	endif()
+	set(androiddump_FILES
+		extcap/androiddump.c
+	)
+
+	add_executable(androiddump WIN32 ${androiddump_FILES})
+	add_dependencies(androiddump gitversion)
+	set_extcap_executable_properties(androiddump)
+	target_link_libraries(androiddump ${androiddump_LIBS})
+	install(TARGETS androiddump RUNTIME DESTINATION ${EXTCAP_DIR})
 endif()
 
 ADD_CUSTOM_COMMAND(
@@ -2139,11 +2270,13 @@ if(ENABLE_APPLICATION_BUNDLE)
 	add_dependencies(app_bundle ${PROGLIST})
 endif()
 
+pod2manhtml( ${CMAKE_SOURCE_DIR}/doc/androiddump 1 )
 pod2manhtml( ${CMAKE_SOURCE_DIR}/doc/capinfos 1 )
 pod2manhtml( ${CMAKE_SOURCE_DIR}/doc/captype 1 )
 pod2manhtml( ${CMAKE_SOURCE_DIR}/doc/dftest 1 )
 pod2manhtml( ${CMAKE_SOURCE_DIR}/doc/dumpcap 1 )
 pod2manhtml( ${CMAKE_SOURCE_DIR}/doc/editcap 1 )
+pod2manhtml( ${CMAKE_SOURCE_DIR}/doc/extcap 4 )
 pod2manhtml( ${CMAKE_SOURCE_DIR}/doc/asn2deb 1 )
 pod2manhtml( ${CMAKE_SOURCE_DIR}/doc/idl2deb 1 )
 pod2manhtml( ${CMAKE_SOURCE_DIR}/doc/idl2wrs 1 )
@@ -2160,6 +2293,7 @@ add_custom_target(
 	html_docs ALL
 	DEPENDS
 		${CMAKE_BINARY_DIR}/AUTHORS-SHORT
+		androiddump.html
 		capinfos.html
 		captype.html
 		dftest.html
@@ -2191,6 +2325,7 @@ set(CLEAN_FILES
 	${captype_FILES}
 	${editcap_FILES}
 	${dumpcap_FILES}
+	${androiddump_FILES}
 )
 
 if (WERROR)

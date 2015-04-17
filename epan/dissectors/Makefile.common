@@ -309,6 +309,7 @@ DISSECTOR_SRC = \
 	packet-asterix.c	\
 	packet-at.c		\
 	packet-atalk.c		\
+	packet-ath.c		\
 	packet-atm.c		\
 	packet-atmtcp.c		\
 	packet-auto_rp.c	\
@@ -623,6 +624,7 @@ DISSECTOR_SRC = \
 	packet-gearman.c	\
 	packet-ged125.c		\
 	packet-geneve.c		\
+	packet-gias.c		\
 	packet-gift.c		\
 	packet-giop.c		\
 	packet-git.c		\
@@ -1645,7 +1647,6 @@ DISSECTOR_INCLUDES =	\
 	packet-rquota.h	\
 	packet-rrc.h	\
 	packet-rsvp.h	\
-	packet-rtacser.h	\
 	packet-rtcp.h	\
 	packet-rtp.h	\
 	packet-rtps.h	\

@@ -31,9 +31,11 @@
 #include <epan/addr_resolv.h>
 #include "packet-ipv6.h"
 #include "packet-6lowpan.h"
+#include "packet-btl2cap.h"
+#include "packet-zbee.h"
+
 void proto_register_6lowpan(void);
 void proto_reg_handoff_6lowpan(void);
-#include "packet-zbee.h"
 
 /* Definitions for 6lowpan packet disassembly structures and routines */
 
@@ -289,6 +291,7 @@ static expert_field ei_6lowpan_illegal_dest_addr_mode = EI_INIT;
 static expert_field ei_6lowpan_bad_ipv6_header_length = EI_INIT;
 
 /* Subdissector handles. */
+static dissector_handle_t       handle_6lowpan;
 static dissector_handle_t       data_handle;
 static dissector_handle_t       ipv6_handle;
 
@@ -1320,7 +1323,7 @@ dissect_6lowpan_hc1(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, gint dg
 
         /* Construct the next header for the UDP datagram. */
         offset = BITS_TO_BYTE_LEN(0, bit_offset);
-        length = (gint)tvb_ensure_length_remaining(tvb, offset);
+        length = (gint)tvb_ensure_captured_length_remaining(tvb, offset);
         nhdr_list = (struct lowpan_nhdr *)wmem_alloc(wmem_packet_scope(), sizeof(struct lowpan_nhdr) + sizeof(struct udp_hdr) + length);
         nhdr_list->next = NULL;
         nhdr_list->proto = IP_PROTO_UDP;
@@ -1338,7 +1341,7 @@ dissect_6lowpan_hc1(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, gint dg
     else {
         gint length;
         offset = BITS_TO_BYTE_LEN(0, bit_offset);
-        length = (gint)tvb_ensure_length_remaining(tvb, offset);
+        length = (gint)tvb_ensure_captured_length_remaining(tvb, offset);
         nhdr_list = (struct lowpan_nhdr *)wmem_alloc(wmem_packet_scope(), sizeof(struct lowpan_nhdr) + length);
         nhdr_list->next = NULL;
         nhdr_list->proto = ipv6.ip6_nxt;
@@ -1768,7 +1771,7 @@ dissect_6lowpan_iphc(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, gint d
     }
     /* Create an extension header for the remaining payload. */
     else {
-        length = (gint)tvb_ensure_length_remaining(tvb, offset);
+        length = (gint)tvb_ensure_captured_length_remaining(tvb, offset);
         nhdr_list = (struct lowpan_nhdr *)wmem_alloc(wmem_packet_scope(), sizeof(struct lowpan_nhdr) + length);
         nhdr_list->next = NULL;
         nhdr_list->proto = ipv6.ip6_nxt;
@@ -1956,7 +1959,7 @@ dissect_6lowpan_iphc_nhc(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, gi
         }
         else {
             /* Create another next header structure for the remaining payload. */
-            length = (gint)tvb_ensure_length_remaining(tvb, offset);
+            length = (gint)tvb_ensure_captured_length_remaining(tvb, offset);
             nhdr->next = (struct lowpan_nhdr *)wmem_alloc(wmem_packet_scope(), sizeof(struct lowpan_nhdr) + length);
             nhdr->next->next = NULL;
             nhdr->next->proto = ipv6_ext.ip6e_nxt;
@@ -2105,7 +2108,7 @@ dissect_6lowpan_iphc_nhc(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, gi
 #endif
 
         /* Create the next header structure for the UDP datagram. */
-        length = (gint)tvb_ensure_length_remaining(tvb, offset);
+        length = (gint)tvb_ensure_captured_length_remaining(tvb, offset);
         nhdr = (struct lowpan_nhdr *)wmem_alloc(wmem_packet_scope(), sizeof(struct lowpan_nhdr) + sizeof(struct udp_hdr) + length);
         nhdr->next = NULL;
         nhdr->proto = IP_PROTO_UDP;
@@ -2790,7 +2793,7 @@ proto_register_6lowpan(void)
     expert_register_field_array(expert_6lowpan, ei, array_length(ei));
 
     /* Register the dissector with wireshark. */
-    new_register_dissector("6lowpan", dissect_6lowpan, proto_6lowpan);
+    handle_6lowpan = new_register_dissector("6lowpan", dissect_6lowpan, proto_6lowpan);
 
     /* Register the dissector init function */
     register_init_routine(proto_init_6lowpan);
@@ -2894,8 +2897,10 @@ proto_reg_handoff_6lowpan(void)
     ipv6_handle = find_dissector("ipv6");
 
     /* Register the 6LoWPAN dissector with IEEE 802.15.4 */
-    dissector_add_for_decode_as(IEEE802154_PROTOABBREV_WPAN_PANID, find_dissector("6lowpan"));
+    dissector_add_for_decode_as(IEEE802154_PROTOABBREV_WPAN_PANID, handle_6lowpan);
     heur_dissector_add(IEEE802154_PROTOABBREV_WPAN, dissect_6lowpan_heur, proto_6lowpan);
+
+    dissector_add_uint("btl2cap.psm", BTL2CAP_PSM_LE_IPSP, handle_6lowpan);
 } /* proto_reg_handoff_6lowpan */
 
 

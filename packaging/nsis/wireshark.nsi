@@ -341,6 +341,7 @@ File "${STAGING_DIR}\wireshark.html"
 File "${STAGING_DIR}\wireshark-filter.html"
 File "${STAGING_DIR}\dumpcap.exe"
 File "${STAGING_DIR}\dumpcap.html"
+File "${STAGING_DIR}\extcap.html"
 File "${STAGING_DIR}\ipmap.html"
 
 ; C-runtime redistributable
@@ -589,6 +590,7 @@ File "${STAGING_DIR}\radius\dictionary.rfc6930"
 File "${STAGING_DIR}\radius\dictionary.rfc7055"
 File "${STAGING_DIR}\radius\dictionary.rfc7155"
 File "${STAGING_DIR}\radius\dictionary.rfc7268"
+File "${STAGING_DIR}\radius\dictionary.rfc7499"
 File "${STAGING_DIR}\radius\dictionary.riverbed"
 File "${STAGING_DIR}\radius\dictionary.riverstone"
 File "${STAGING_DIR}\radius\dictionary.roaringpenguin"
@@ -888,7 +890,7 @@ SectionGroup "Plugins & Extensions" SecPluginsGroup
 
 Section "Dissector Plugins" SecPlugins
 ;-------------------------------------------
-SetOutPath '$INSTDIR\plugins'
+SetOutPath '$INSTDIR\plugins\${VERSION}'
 File "${STAGING_DIR}\plugins\docsis.dll"
 File "${STAGING_DIR}\plugins\ethercat.dll"
 File "${STAGING_DIR}\plugins\gryphon.dll"
@@ -905,13 +907,13 @@ SectionEnd
 
 Section "Tree Statistics Plugin" SecStatsTree
 ;-------------------------------------------
-SetOutPath '$INSTDIR\plugins'
+SetOutPath '$INSTDIR\plugins\${VERSION}'
 File "${STAGING_DIR}\plugins\stats_tree.dll"
 SectionEnd
 
 Section "Mate - Meta Analysis and Tracing Engine" SecMate
 ;-------------------------------------------
-SetOutPath '$INSTDIR\plugins'
+SetOutPath '$INSTDIR\plugins\${VERSION}'
 File "${STAGING_DIR}\plugins\mate.dll"
 SectionEnd
 
@@ -984,6 +986,14 @@ File "${STAGING_DIR}\rawshark.exe"
 File "${STAGING_DIR}\rawshark.html"
 SectionEnd
 
+Section /o "Androiddump" SecAndroiddumpinfos
+;-------------------------------------------
+SetOutPath $INSTDIR
+File "${STAGING_DIR}\androiddump.html"
+SetOutPath $INSTDIR\extcap
+File "${STAGING_DIR}\extcap\androiddump.exe"
+SectionEnd
+
 SectionGroupEnd ; "Tools"
 
 !ifdef USER_GUIDE_DIR
@@ -1029,6 +1039,7 @@ SectionEnd
 !endif
 
   !insertmacro MUI_DESCRIPTION_TEXT ${SecToolsGroup} "Additional command line based tools."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecAndroiddumpinfos} "Provide capture interfaces from Android devices"
   !insertmacro MUI_DESCRIPTION_TEXT ${SecEditCap} "Copy packets to a new file, optionally trimmming packets, omitting them, or saving to a different format."
   !insertmacro MUI_DESCRIPTION_TEXT ${SecText2Pcap} "Read an ASCII hex dump and write the data into a libpcap-style capture file."
   !insertmacro MUI_DESCRIPTION_TEXT ${SecMergecap} "Combine multiple saved capture files into a single output file"

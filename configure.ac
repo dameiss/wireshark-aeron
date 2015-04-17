@@ -536,7 +536,7 @@ AC_SUBST(FLOORL_LO)
 # GUI toolkit options
 #
 AC_ARG_WITH([qt],
-  AC_HELP_STRING( [--with-qt=@<:@yes/no@:>@],
+  AC_HELP_STRING( [--with-qt=@<:@yes/no/4/5@:>@],
                   [use Qt @<:@default=yes@:>@]),
   with_qt="$withval", with_qt="unspecified")
 
@@ -1284,7 +1284,15 @@ else
 		# documentation I can find online.
 		#
 		CFLAGS="-Ae +O2 $CFLAGS"
-		CFLAGS_FOR_BUILD="-Ae +O2 $CFLAGS"
+		if test "$CC" = "$CC_FOR_BUILD"; then
+			#
+			# We're building the build tools with the same
+			# compiler as the one with which we're building
+			# Wireshark, so add the flags to the flags for
+			# that compiler as well.
+			#
+			CFLAGS_FOR_BUILD="-Ae +O2 $CFLAGS"
+		fi
 		CXXFLAGS="+O2 $CFLAGS"
 		AC_MSG_RESULT(HP ANSI C compiler - added -Ae +O2)
 		;;
@@ -1598,7 +1606,7 @@ if test "x$enable_wireshark" = "xyes"; then
 		with_qt=yes
 		with_gtk3=yes
 	fi
-	if test "x$with_qt" = "xyes"; then
+	if test "x$with_qt" != "xno"; then
 		#
 		# Qt was specified; Make sure we have a C++ compiler.
 		#
@@ -1610,14 +1618,29 @@ if test "x$enable_wireshark" = "xyes"; then
 		# Now make sure we have Qt and, if so, add the flags
 		# for it to CFLAGS and CXXFLAGS.
 		#
-		AC_WIRESHARK_QT_CHECK($QT_MIN_VERSION,
+		AC_WIRESHARK_QT_CHECK($QT_MIN_VERSION, "$with_qt",
 		[
 			CFLAGS="$CFLAGS $Qt_CFLAGS"
 			CXXFLAGS="$CXXFLAGS $Qt_CFLAGS"
 			have_qt=yes
 			GUI_CONFIGURE_FLAGS="$GUI_CONFIGURE_FLAGS --with-qt"
 		],
-		[AC_MSG_ERROR([Qt is not available])])
+		[
+			case "$with_qt" in
+
+			yes)
+				AC_MSG_ERROR([Qt is not available])
+				;;
+
+			4)
+				AC_MSG_ERROR([Qt 4 is not available])
+				;;
+
+			5)
+				AC_MSG_ERROR([Qt 5 is not available])
+				;;
+			esac
+		])
 
 		#
 		# XXX - greasy hack to make ui/gtk/recent.c
@@ -1791,7 +1814,7 @@ then
 		AC_PATH_PROG(UIC, uic-qt4)
 		if test "x$UIC" = x
 		then
-			if test "x$with_qt" = "xyes"; then
+			if test "x$with_qt" != "xno"; then
 				#
 				# If you want to build with Qt, you'd better
 				# have uic.
@@ -1821,7 +1844,7 @@ then
 		AC_PATH_PROG(MOC, moc-qt4)
 		if test "x$MOC" = x
 		then
-			if test "x$with_qt" = "xyes"; then
+			if test "x$with_qt" != "xno"; then
 				#
 				# If you want to build with Qt, you'd better
 				# have moc.
@@ -1851,7 +1874,7 @@ then
 		AC_PATH_PROG(RCC, rcc)
 		if test "x$RCC" = x
 		then
-			if test "x$with_qt" = "xyes"; then
+			if test "x$with_qt" != "xno"; then
 				#
 				# If you want to build with Qt, you'd better
 				# have moc.
@@ -2296,6 +2319,38 @@ fi
 AC_SUBST(rawshark_bin)
 AC_SUBST(rawshark_man)
 
+dnl androiddump check
+AC_MSG_CHECKING(whether to build androiddump)
+
+AC_ARG_ENABLE(androiddump,
+  AC_HELP_STRING( [--enable-androiddump],
+                  [build androiddump @<:@default=yes@:>@]),
+    androiddump=$enableval,enable_androiddump=yes)
+
+if test "x$enable_androiddump" = "xyes" ; then
+	AC_MSG_RESULT(yes)
+else
+	AC_MSG_RESULT(no)
+fi
+
+AC_ARG_ENABLE(androiddump_use_libpcap,
+  AC_HELP_STRING( [--enable-androiddump-use-libpcap],
+                  [build androiddump using libpcap @<:@default=no@:>@]),
+    androiddump_use_libpcap=$enableval,enable_androiddump_use_libpcap=no)
+
+if test "x$enable_androiddump_use_libpcap" = "xyes" ; then
+	AC_DEFINE(ANDROIDDUMP_USE_LIBPCAP, 1, [Androiddump will use Libpcap])
+fi
+
+if test "x$enable_androiddump" = "xyes" ; then
+	androiddump_bin="androiddump\$(EXEEXT)"
+	androiddump_man=""
+else
+	androiddump_bin=""
+	androiddump_man=""
+fi
+AC_SUBST(androiddump_bin)
+AC_SUBST(androiddump_man)
 
 # Enable/disable echld
 AC_ARG_ENABLE(echld,
@@ -3344,6 +3399,7 @@ echo "                    Build text2pcap : $enable_text2pcap"
 echo "                      Build randpkt : $enable_randpkt"
 echo "                       Build dftest : $enable_dftest"
 echo "                     Build rawshark : $enable_rawshark"
+echo "                  Build androiddump : $enable_androiddump"
 echo "                        Build echld : $have_echld"
 echo ""
 echo "   Save files as pcap-ng by default : $enable_pcap_ng_default"

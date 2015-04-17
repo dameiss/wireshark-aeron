@@ -62,9 +62,6 @@ static HANDLE pipe_h = NULL;
  */
 static GHashTable *ifaces = NULL;
 
-/* Prefix for the pipe interfaces */
-#define EXTCAP_PIPE_PREFIX "wireshark_extcap"
-
 /* Callback definition for extcap_foreach */
 typedef gboolean (*extcap_cb_t)(const gchar *extcap, gchar *output, void *data,
         gchar **err_str);
@@ -142,10 +139,27 @@ static void extcap_foreach(gint argc, gchar **args, extcap_cb_t cb,
     const gchar *file;
     gboolean keep_going;
     gchar **argv;
+#ifdef WIN32
+    gchar **dll_search_envp;
+    gchar *progfile_dir;
+#endif
 
     keep_going = TRUE;
 
     argv = (gchar **) g_malloc0(sizeof(gchar *) * (argc + 2));
+
+#ifdef WIN32
+    /*
+     * Make sure executables can find dependent DLLs and that they're *our*
+     * DLLs: https://msdn.microsoft.com/en-us/library/windows/desktop/ms682586.aspx
+     * Alternatively we could create a simple wrapper exe similar to Create
+     * Hidden Process (http://www.commandline.co.uk/chp/).
+     */
+    dll_search_envp = g_get_environ();
+    progfile_dir = g_strdup_printf("%s;%s", get_progfile_dir(), g_environ_getenv(dll_search_envp, "Path"));
+    dll_search_envp = g_environ_setenv(dll_search_envp, "Path", progfile_dir, TRUE);
+    g_free(progfile_dir);
+#endif
 
     if ((dir = g_dir_open(dirname, 0, NULL)) != NULL) {
 #ifdef WIN32
@@ -159,12 +173,14 @@ static void extcap_foreach(gint argc, gchar **args, extcap_cb_t cb,
             gint i;
             gint exit_status = 0;
             GError *error = NULL;
+            gchar **envp = NULL;
 
             /* full path to extcap binary */
             extcap_string = g_string_new("");
 #ifdef WIN32
             g_string_printf(extcap_string, "%s\\\\%s",dirname,file);
             extcap = g_string_free(extcap_string, FALSE);
+            envp = dll_search_envp;
 #else
             g_string_printf(extcap_string, "%s/%s", dirname, file);
             extcap = g_string_free(extcap_string, FALSE);
@@ -177,7 +193,7 @@ static void extcap_foreach(gint argc, gchar **args, extcap_cb_t cb,
                 argv[i+1] = args[i];
             argv[argc+1] = NULL;
 
-            status = g_spawn_sync(dirname, argv, NULL,
+            status = g_spawn_sync(dirname, argv, envp,
                 (GSpawnFlags) 0, NULL, NULL,
                     &command_output, NULL, &exit_status, &error);
 
@@ -191,6 +207,9 @@ static void extcap_foreach(gint argc, gchar **args, extcap_cb_t cb,
         g_dir_close(dir);
     }
 
+#ifdef WIN32
+    g_strfreev(dll_search_envp);
+#endif
     g_free(argv);
 }
 
@@ -397,9 +416,6 @@ extcap_get_if_configuration(const char * ifname) {
     {
         g_log(LOG_DOMAIN_CAPTURE, G_LOG_LEVEL_DEBUG, "Extcap path %s",
                 get_extcap_dir());
-
-        if (err_str != NULL)
-        *err_str = NULL;
 
         argv[0] = g_strdup(EXTCAP_ARGUMENT_CONFIG);
         argv[1] = g_strdup(EXTCAP_ARGUMENT_INTERFACE);

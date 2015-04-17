@@ -50,6 +50,7 @@ ui_toolkit="qt"
 wireshark_bin_name="wireshark"
 
 binary_list="
+	androiddump
 	capinfos
 	dftest
 	dumpcap
