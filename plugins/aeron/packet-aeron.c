@@ -222,18 +222,18 @@ static aeron_frame_info_t * aeron_frame_info_add(guint32 frame, guint32 ofs)
 }
 
 /*----------------------------------------------------------------------------*/
-/* Aeron channel management.                                                  */
+/* Aeron channel ID management.                                               */
 /*----------------------------------------------------------------------------*/
-static guint64 aeron_channel = 1;
+static guint64 aeron_channel_id = 1;
 
-static guint64 aeron_channel_assign(void)
+static guint64 aeron_channel_id_assign(void)
 {
-    return (aeron_channel++);
+    return (aeron_channel_id++);
 }
 
-static void aeron_channel_init(void)
+static void aeron_channel_id_init(void)
 {
-    aeron_channel = 1;
+    aeron_channel_id = 1;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -262,7 +262,7 @@ typedef struct aeron_fragment_t_stct aeron_fragment_t;
 
 struct aeron_transport_t_stct
 {
-    guint64 channel;
+    guint64 channel_id;
     wmem_tree_t * stream;                   /* Tree of all streams (aeron_stream_t) in this transport, keyed by stream ID */
     aeron_frame_info_t * last_frame;
     address addr1;
@@ -368,7 +368,7 @@ static aeron_transport_t * aeron_transport_add(const aeron_conversation_info_t *
         return (transport);
     }
     transport = wmem_new0(wmem_file_scope(), aeron_transport_t);
-    transport->channel = aeron_channel_assign();
+    transport->channel_id = aeron_channel_id_assign();
     transport->stream = wmem_tree_new(wmem_file_scope());
     transport->last_frame = NULL;
     WMEM_COPY_ADDRESS(wmem_file_scope(), &(transport->addr1), cinfo->addr1);
@@ -1190,7 +1190,7 @@ static gint ett_aeron_sequence_analysis_term_offset = -1;
 static gint ett_aeron_stream_analysis = -1;
 
 /* Dissector field handles */
-static int hf_aeron_channel = -1;
+static int hf_aeron_channel_id = -1;
 static int hf_aeron_pad = -1;
 static int hf_aeron_pad_version = -1;
 static int hf_aeron_pad_flags = -1;
@@ -1540,13 +1540,7 @@ static void aeron_sequence_setup(packet_info * pinfo, aeron_transport_t * transp
                                             if (rc == 0)
                                             {
                                                 /* Completed term ID and offset stayed the same. */
-                                                if (pdpv)
-                                                {
-                                                    if (aeron_pos_compare(&pdp, &rp) == 0)
-                                                    {
-                                                        finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_KEEPALIVE_SM;
-                                                    }
-                                                }
+                                               finfo->analysis->flags |= AERON_STREAM_ANALYSIS_FLAGS_KEEPALIVE_SM;
                                             }
                                             else if (rc < 0)
                                             {
@@ -1562,7 +1556,7 @@ static void aeron_sequence_setup(packet_info * pinfo, aeron_transport_t * transp
                                         break;
                                 }
                             }
-                            if (info->type == HDR_TYPE_DATA)
+                            if ((info->type == HDR_TYPE_DATA) || (info->type == HDR_TYPE_PAD))
                             {
                                 aeron_fragment_t * fragment = NULL;
 
@@ -1864,7 +1858,7 @@ static void aeron_next_offset_report(tvbuff_t * tvb, proto_tree * tree, aeron_tr
     }
 }
 
-static void aeron_info_stream_progress_report(packet_info * pinfo, guint16 msgtype, guint8 flags, aeron_transport_t * transport _U_, aeron_frame_info_t * finfo)
+static void aeron_info_stream_progress_report(packet_info * pinfo, guint16 msgtype, guint8 flags, guint32 term_id, guint32 term_offset, aeron_frame_info_t * finfo)
 {
     const gchar * type_string = val_to_str_const((guint32) msgtype, aeron_frame_type, "Unknown");
 
@@ -1874,19 +1868,33 @@ static void aeron_info_stream_progress_report(packet_info * pinfo, guint16 msgty
         {
             case HDR_TYPE_PAD:
             case HDR_TYPE_DATA:
-                col_append_sep_fstr(pinfo->cinfo, COL_INFO, " ", "%s (0x%08x:%" G_GUINT32_FORMAT ")",
-                    type_string, finfo->analysis->high.term_id, finfo->analysis->high.term_offset);
-                break;
-            case HDR_TYPE_SM:
-                if (finfo->analysis->high.term_id == finfo->analysis->completed.term_id)
+                if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_KEEPALIVE) != 0)
                 {
-                    col_append_sep_fstr(pinfo->cinfo, COL_INFO, " ", "%s (%" G_GUINT32_FORMAT "/%" G_GUINT32_FORMAT " [%" G_GUINT32_FORMAT "])",
-                        type_string, finfo->analysis->high.term_offset, finfo->analysis->completed.term_offset, finfo->analysis->outstanding_bytes);
+                    col_append_sep_fstr(pinfo->cinfo, COL_INFO, ", ", "%s-KA", type_string);
                 }
                 else
                 {
-                    col_append_sep_fstr(pinfo->cinfo, COL_INFO, " ", "%s (0x%08x:%" G_GUINT32_FORMAT "/0x%08x:%" G_GUINT32_FORMAT " [%" G_GUINT32_FORMAT "])",
-                        type_string, finfo->analysis->high.term_id, finfo->analysis->high.term_offset, finfo->analysis->completed.term_id, finfo->analysis->completed.term_offset, finfo->analysis->outstanding_bytes);
+                    col_append_sep_fstr(pinfo->cinfo, COL_INFO, ", ", "%s (0x%08x:%" G_GUINT32_FORMAT ")",
+                        type_string, term_id, term_offset);
+                }
+                break;
+            case HDR_TYPE_SM:
+                if ((finfo->analysis->flags & AERON_STREAM_ANALYSIS_FLAGS_KEEPALIVE_SM) != 0)
+                {
+                    col_append_sep_fstr(pinfo->cinfo, COL_INFO, ", ", "%s-KA", type_string);                   
+                }
+                else
+                {
+                    if (finfo->analysis->high.term_id == finfo->analysis->completed.term_id)
+                    {
+                        col_append_sep_fstr(pinfo->cinfo, COL_INFO, ", ", "%s (%" G_GUINT32_FORMAT "/%" G_GUINT32_FORMAT " [%" G_GUINT32_FORMAT "])",
+                            type_string, finfo->analysis->high.term_offset, finfo->analysis->completed.term_offset, finfo->analysis->outstanding_bytes);
+                    }
+                    else
+                    {
+                        col_append_sep_fstr(pinfo->cinfo, COL_INFO, ", ", "%s (0x%08x:%" G_GUINT32_FORMAT "/0x%08x:%" G_GUINT32_FORMAT " [%" G_GUINT32_FORMAT "])",
+                            type_string, finfo->analysis->high.term_id, finfo->analysis->high.term_offset, finfo->analysis->completed.term_id, finfo->analysis->completed.term_offset, finfo->analysis->outstanding_bytes);
+                    }
                 }
                 break;
         }
@@ -1895,11 +1903,11 @@ static void aeron_info_stream_progress_report(packet_info * pinfo, guint16 msgty
     {
         if ((msgtype == HDR_TYPE_SM) && ((flags & STATUS_FLAGS_SETUP) != 0))
         {
-            col_append_sep_fstr(pinfo->cinfo, COL_INFO, " ", "%s[SETUP]", type_string);
+            col_append_sep_fstr(pinfo->cinfo, COL_INFO, ", ", "%s-SETUP", type_string);
         }
         else
         {
-            col_append_sep_str(pinfo->cinfo, COL_INFO, " ", type_string);
+            col_append_sep_str(pinfo->cinfo, COL_INFO, ", ", type_string);
         }
     }
 }
@@ -1940,11 +1948,11 @@ static int dissect_aeron_pad(tvbuff_t * tvb, int offset, packet_info * pinfo, pr
     sinfo.flags = tvb_get_guint8(tvb, offset + O_AERON_PAD_FLAGS);
     aeron_sequence_setup(pinfo, transport, &sinfo, finfo);
 
-    aeron_info_stream_progress_report(pinfo, HDR_TYPE_PAD, sinfo.flags, transport, finfo);
+    aeron_info_stream_progress_report(pinfo, HDR_TYPE_PAD, sinfo.flags, term_id, term_offset, finfo);
     item = proto_tree_add_none_format(tree, hf_aeron_pad, tvb, offset, -1, "Pad Frame: Term 0x%x, Ofs %" G_GUINT32_FORMAT ", Len %" G_GUINT32_FORMAT "(%d)",
         term_id, term_offset, frame_len, rounded_len);
     subtree = proto_item_add_subtree(item, ett_aeron_pad);
-    channel_item = proto_tree_add_uint64(subtree, hf_aeron_channel, tvb, 0, 0, transport->channel);
+    channel_item = proto_tree_add_uint64(subtree, hf_aeron_channel_id, tvb, 0, 0, transport->channel_id);
     PROTO_ITEM_SET_GENERATED(channel_item);
     proto_tree_add_item(subtree, hf_aeron_pad_version, tvb, offset + O_AERON_PAD_VERSION, 1, ENC_LITTLE_ENDIAN);
     proto_tree_add_item(subtree, hf_aeron_pad_flags, tvb, offset + O_AERON_PAD_FLAGS, 1, ENC_LITTLE_ENDIAN);
@@ -2013,11 +2021,11 @@ static int dissect_aeron_data(tvbuff_t * tvb, int offset, packet_info * pinfo, p
     sinfo.flags = tvb_get_guint8(tvb, offset + O_AERON_DATA_FLAGS);
     aeron_sequence_setup(pinfo, transport, &sinfo, finfo);
 
-    aeron_info_stream_progress_report(pinfo, HDR_TYPE_DATA, sinfo.flags, transport, finfo);
+    aeron_info_stream_progress_report(pinfo, HDR_TYPE_DATA, sinfo.flags, term_id, term_offset, finfo);
     item = proto_tree_add_none_format(tree, hf_aeron_data, tvb, offset, -1, "Data Frame: Term 0x%x, Ofs %" G_GUINT32_FORMAT ", Len %" G_GUINT32_FORMAT "(%d)",
         (guint32) term_id, term_offset, frame_len, rounded_len);
     subtree = proto_item_add_subtree(item, ett_aeron_data);
-    item = proto_tree_add_uint64(subtree, hf_aeron_channel, tvb, 0, 0, transport->channel);
+    item = proto_tree_add_uint64(subtree, hf_aeron_channel_id, tvb, 0, 0, transport->channel_id);
     PROTO_ITEM_SET_GENERATED(item);
     proto_tree_add_item(subtree, hf_aeron_data_version, tvb, offset + O_AERON_DATA_VERSION, 1, ENC_LITTLE_ENDIAN);
     proto_tree_add_bitmask(subtree, tvb, offset + O_AERON_DATA_FLAGS, hf_aeron_data_flags, ett_aeron_data_flags, flags, ENC_LITTLE_ENDIAN);
@@ -2112,7 +2120,7 @@ static int dissect_aeron_nak(tvbuff_t * tvb, int offset, packet_info * pinfo, pr
     item = proto_tree_add_none_format(tree, hf_aeron_nak, tvb, offset, -1, "NAK Frame: Term 0x%x, Ofs %" G_GUINT32_FORMAT ", Len %" G_GUINT32_FORMAT,
         term_id, nak_term_offset, nak_length);
     subtree = proto_item_add_subtree(item, ett_aeron_nak);
-    channel_item = proto_tree_add_uint64(subtree, hf_aeron_channel, tvb, 0, 0, transport->channel);
+    channel_item = proto_tree_add_uint64(subtree, hf_aeron_channel_id, tvb, 0, 0, transport->channel_id);
     PROTO_ITEM_SET_GENERATED(channel_item);
     proto_tree_add_item(subtree, hf_aeron_nak_version, tvb, offset + O_AERON_NAK_VERSION, 1, ENC_LITTLE_ENDIAN);
     proto_tree_add_item(subtree, hf_aeron_nak_flags, tvb, offset + O_AERON_NAK_FLAGS, 1, ENC_LITTLE_ENDIAN);
@@ -2192,11 +2200,11 @@ static int dissect_aeron_sm(tvbuff_t * tvb, int offset, packet_info * pinfo, pro
     sinfo.type = HDR_TYPE_SM;
     aeron_sequence_setup(pinfo, transport, &sinfo, finfo);
 
-    aeron_info_stream_progress_report(pinfo, HDR_TYPE_SM, sinfo.flags, transport, finfo);
+    aeron_info_stream_progress_report(pinfo, HDR_TYPE_SM, sinfo.flags, term_id, comp_offset, finfo);
     item = proto_tree_add_none_format(tree, hf_aeron_sm, tvb, offset, -1, "Status Message: Term 0x%x, CompletedOfs %" G_GUINT32_FORMAT ", RcvWindow %" G_GUINT32_FORMAT,
         term_id, comp_offset, rcv_window);
     subtree = proto_item_add_subtree(item, ett_aeron_sm);
-    channel_item = proto_tree_add_uint64(subtree, hf_aeron_channel, tvb, 0, 0, transport->channel);
+    channel_item = proto_tree_add_uint64(subtree, hf_aeron_channel_id, tvb, 0, 0, transport->channel_id);
     PROTO_ITEM_SET_GENERATED(channel_item);
     proto_tree_add_item(subtree, hf_aeron_sm_version, tvb, offset + O_AERON_SM_VERSION, 1, ENC_LITTLE_ENDIAN);
     proto_tree_add_bitmask(subtree, tvb, offset + O_AERON_SM_FLAGS, hf_aeron_sm_flags, ett_aeron_sm_flags, flags, ENC_LITTLE_ENDIAN);
@@ -2312,7 +2320,7 @@ static int dissect_aeron_setup(tvbuff_t * tvb, int offset, packet_info * pinfo, 
     item = proto_tree_add_none_format(tree, hf_aeron_setup, tvb, offset, -1, "Setup Frame: InitTerm 0x%x, ActiveTerm 0x%x, TermLen %" G_GUINT32_FORMAT ", Ofs %" G_GUINT32_FORMAT ", MTU %" G_GUINT32_FORMAT,
         initial_term_id, (guint32) active_term_id, term_length, term_offset, mtu);
     subtree = proto_item_add_subtree(item, ett_aeron_setup);
-    channel_item = proto_tree_add_uint64(subtree, hf_aeron_channel, tvb, 0, 0, transport->channel);
+    channel_item = proto_tree_add_uint64(subtree, hf_aeron_channel_id, tvb, 0, 0, transport->channel_id);
     PROTO_ITEM_SET_GENERATED(channel_item);
     proto_tree_add_item(subtree, hf_aeron_setup_version, tvb, offset + O_AERON_SETUP_VERSION, 1, ENC_LITTLE_ENDIAN);
     proto_tree_add_item(subtree, hf_aeron_setup_flags, tvb, offset + O_AERON_SETUP_FLAGS, 1, ENC_LITTLE_ENDIAN);
@@ -2467,7 +2475,7 @@ static gboolean test_aeron_packet(tvbuff_t * tvb, packet_info * pinfo, proto_tre
 
 static void aeron_init(void)
 {
-    aeron_channel_init();
+    aeron_channel_id_init();
 }
 
 /* Register all the bits needed with the filtering engine */
@@ -2475,8 +2483,8 @@ void proto_register_aeron(void)
 {
     static hf_register_info hf[] =
     {
-        { &hf_aeron_channel,
-            { "Channel", "aeron.channel", FT_UINT64, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_aeron_channel_id,
+            { "Channel ID", "aeron.channel_id", FT_UINT64, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_aeron_pad,
             { "Pad Frame", "aeron.pad", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_aeron_pad_version,
