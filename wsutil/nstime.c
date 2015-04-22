@@ -183,7 +183,124 @@ double nstime_to_msec(const nstime_t *nstime)
 
 double nstime_to_sec(const nstime_t *nstime)
 {
-    return ((double)nstime->secs + (double)nstime->nsecs/1000000000);
+    return ((double)nstime->secs + (double)nstime->nsecs/NS_PER_S);
+}
+
+/*
+ * This code is based on the Samba code:
+ *
+ *  Unix SMB/Netbios implementation.
+ *  Version 1.9.
+ *  time handling functions
+ *  Copyright (C) Andrew Tridgell 1992-1998
+ */
+
+/*
+ * Number of seconds between the UN*X epoch (January 1, 1970, 00:00:00 GMT)
+ * and the Windows NT epoch (January 1, 1601 in the proleptic Gregorian
+ * calendar, 00:00:00 "GMT")
+ *
+ * This is
+ *
+ *     369*365.25*24*60*60-(3*24*60*60+6*60*60)
+ *
+ * 1970-1601 is 369; 365.25 is the average length of a year in days,
+ * including leap years.
+ *
+ * 3 days are subtracted because 1700, 1800, and 1900 were not leap
+ * years, as, while they're all evenly divisible by 4, they're also
+ * evently divisible by 100, but not evently divisible by 400, so
+ * we need to compensate for using the average length of a year in
+ * days, which assumes a leap year every 4 years, *including* every
+ * 100 years.
+ *
+ * I'm not sure what the extra 6 hours are that are being subtracted.
+ */
+#define TIME_FIXUP_CONSTANT G_GUINT64_CONSTANT(11644473600)
+
+#ifndef TIME_T_MIN
+#define TIME_T_MIN ((time_t) ((time_t)0 < (time_t) -1 ? (time_t) 0 \
+		    : ~ (time_t) 0 << (sizeof (time_t) * CHAR_BIT - 1)))
+#endif
+#ifndef TIME_T_MAX
+#define TIME_T_MAX ((time_t) (~ (time_t) 0 - TIME_T_MIN))
+#endif
+
+static gboolean
+common_filetime_to_nstime(nstime_t *nstime, guint64 ftsecs, int nsecs)
+{
+    gint64 secs;
+    /* The next two lines are a fix needed for the
+       broken SCO compiler. JRA. */
+    time_t l_time_min = TIME_T_MIN;
+    time_t l_time_max = TIME_T_MAX;
+
+    /*
+     * Shift the seconds from the Windows epoch to the UN*X epoch.
+     * ftsecs's value should fit in a 64-bit signed variable, as
+     * ftsecs is derived from a 64-bit fractions-of-a-second value,
+     * and is far from the maximum 64-bit signed value, and
+     * TIME_FIXUP_CONSTANT is also far from the maximum 64-bit
+     * signed value, so the difference between them should also
+     * fit in a 64-bit signed value.
+     */
+    secs = (gint64)ftsecs - TIME_FIXUP_CONSTANT;
+
+    if (!(l_time_min <= secs && secs <= l_time_max)) {
+        /* The result won't fit in a time_t */
+        return FALSE;
+    }
+
+    /*
+     * Get the time as seconds and nanoseconds.
+     */
+    nstime->secs = (time_t) secs;
+    nstime->nsecs = nsecs;
+    return TRUE;
+}
+
+/*
+ * function: filetime_to_nstime
+ * converts a Windows FILETIME value to an nstime_t
+ * returns TRUE if the conversion succeeds, FALSE if it doesn't
+ * (for example, with a 32-bit time_t, the time overflows or
+ * underflows time_t)
+ */
+gboolean
+filetime_to_nstime(nstime_t *nstime, guint64 filetime)
+{
+    guint64 ftsecs;
+    int nsecs;
+
+    /*
+     * Split into seconds and tenths of microseconds, and
+     * then convert tenths of microseconds to nanoseconds.
+     */
+    ftsecs = filetime / 10000000;
+    nsecs = (int)((filetime % 10000000)*100);
+
+    return common_filetime_to_nstime(nstime, ftsecs, nsecs);
+}
+
+/*
+ * function: nsfiletime_to_nstime
+ * converts a Windows FILETIME-like value, but given in nanoseconds
+ * rather than 10ths of microseconds, to an nstime_t
+ * returns TRUE if the conversion succeeds, FALSE if it doesn't
+ * (for example, with a 32-bit time_t, the time overflows or
+ * underflows time_t)
+ */
+gboolean
+nsfiletime_to_nstime(nstime_t *nstime, guint64 nsfiletime)
+{
+    guint64 ftsecs;
+    int nsecs;
+
+    /* Split into seconds and nanoseconds. */
+    ftsecs = nsfiletime / NS_PER_S;
+    nsecs = (int)(nsfiletime % NS_PER_S);
+
+    return common_filetime_to_nstime(nstime, ftsecs, nsecs);
 }
 
 /*
@@ -198,4 +315,3 @@ double nstime_to_sec(const nstime_t *nstime)
  * ex: set shiftwidth=4 tabstop=8 expandtab:
  * :indentSize=4:tabSize=8:noTabs=true:
  */
-

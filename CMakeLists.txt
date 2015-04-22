@@ -21,6 +21,7 @@
 
 project(Wireshark C CXX)
 
+message(STATUS "Generating build using CMake ${CMAKE_VERSION}")
 if(WIN32)
 	# Needed for proper Qt linking. See
 	# http://www.cmake.org/cmake/help/v3.0/policy/CMP0020.html
@@ -41,6 +42,11 @@ cmake_policy(SET CMP0015 NEW)
 #Where to find local cmake scripts
 set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/modules)
 
+# Set old behaviour for LOCATION property
+if (POLICY CMP0026)
+	cmake_policy(SET CMP0026 OLD)
+endif()
+
 # If our target platform is enforced by our generator, set
 # WIRESHARK_TARGET_PLATFORM accordingly. Otherwise use
 # %WIRESHARK_TARGET_PLATFORM%.
@@ -51,11 +57,9 @@ if(WIN32)
 	if("${CMAKE_GENERATOR}" MATCHES "Win64")
 		set(WIRESHARK_TARGET_PLATFORM win64)
 		set(PROCESSOR_ARCHITECTURE amd64)
-		message("Building for x64")
 	elseif("${CMAKE_GENERATOR}" MATCHES "Visual Studio")
 		set(WIRESHARK_TARGET_PLATFORM win32)
 		set(PROCESSOR_ARCHITECTURE x86)
-		message("Building for x86")
 	else()
 		set(WIRESHARK_TARGET_PLATFORM $ENV{WIRESHARK_TARGET_PLATFORM})
 	endif()
@@ -74,6 +78,7 @@ if(WIN32)
 		message(FATAL_ERROR "The PLATFORM environment variable (${_vs_platform})"
 			" doesn't match the generator platform (${WIRESHARK_TARGET_PLATFORM})")
 	endif()
+	message(STATUS "Building for ${WIRESHARK_TARGET_PLATFORM} using ${CMAKE_GENERATOR}")
 
 	# Download third-party libraries
 	file (TO_NATIVE_PATH ${CMAKE_SOURCE_DIR}/tools/win-setup.ps1 _win_setup)
@@ -85,6 +90,7 @@ if(WIN32)
 	elseif(MSVC10)
 		set(_vsversion_args "-VSVersion 10")
 	endif()
+
 	# Is it possible to have a one-time, non-cached option in CMake? If
 	# so, we could add a "-DFORCE_WIN_SETUP" which passes -Force to
 	# win-setup.ps1.
@@ -751,7 +757,7 @@ foreach(PACKAGE ${PACKAGELIST})
 		find_package(${PACKAGE})
 	endif()
 	if (${PACKAGE_VAR}_FOUND)
-		message("${PACKAGE_VAR} FOUND")
+		message(STATUS "${PACKAGE_VAR} FOUND")
 		set(HAVE_LIB${PACKAGE_VAR} 1)
 		include_directories(SYSTEM ${${PACKAGE_VAR}_INCLUDE_DIRS})
 		set(WS_ALL_LIBS ${WS_ALL_LIBS} ${${PACKAGE_VAR}_LIBRARIES})
@@ -773,7 +779,7 @@ foreach(PACKAGE ${PACKAGELIST})
 		#
 		# Do *NOT* report this as an error!
 		#
-		message("${PACKAGE_VAR} NOT FOUND")
+		message(STATUS "${PACKAGE_VAR} NOT FOUND")
 	endif()
 endforeach()
 
@@ -939,23 +945,24 @@ else()
 endif()
 set (DATAFILE_DIR ${_datafile_dir} CACHE INTERNAL "Build time data file location.")
 
-if(ENABLE_EXTCAP)
-	set(HAVE_EXTCAP 1)
-	set(EXTCAP_DIR "${DATAFILE_DIR}/extcap/")
-endif()
-
 if(IS_ABSOLUTE ${CMAKE_INSTALL_LIBDIR})
   set(ABSOLUTE_CMAKE_INSTALL_LIBDIR "${CMAKE_INSTALL_LIBDIR}")
 else()
   set(ABSOLUTE_CMAKE_INSTALL_LIBDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
 endif()
+
+if(ENABLE_EXTCAP)
+	set(HAVE_EXTCAP 1)
+	set(EXTCAP_DIR "${ABSOLUTE_CMAKE_INSTALL_LIBDIR}/${CPACK_PACKAGE_NAME}/extcap/")
+endif()
+
 # Location of our plugins. PLUGIN_DIRECTORY should allow running
 # from the build directory similar to DATAFILE_DIR above.
 if(ENABLE_PLUGINS)
 	set(HAVE_PLUGINS 1)
 	add_custom_target(plugins)
 	set_target_properties(plugins PROPERTIES FOLDER "Plugins")
-	set(PLUGIN_INSTALL_DIR "${ABSOLUTE_CMAKE_INSTALL_LIBDIR}/@CPACK_PACKAGE_NAME@/plugins/${CPACK_PACKAGE_VERSION}")
+	set(PLUGIN_INSTALL_DIR "${ABSOLUTE_CMAKE_INSTALL_LIBDIR}/${CPACK_PACKAGE_NAME}/plugins/${CPACK_PACKAGE_VERSION}")
 	set(PLUGIN_SRC_DIRS
 		plugins/docsis
 		plugins/ethercat
@@ -1790,7 +1797,22 @@ macro(set_extcap_executable_properties _executable)
 			RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR}/run/RelWithDebInfo/extcap
 		)
 	else()
-		set_target_properties(${_executable} PROPERTIES LINK_FLAGS "${WS_LINK_FLAGS}")
+		set_target_properties(${_executable} PROPERTIES
+			LINK_FLAGS "${WS_LINK_FLAGS}"
+			RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/run/extcap
+		)
+		if(ENABLE_APPLICATION_BUNDLE)
+			set_target_properties(${_executable} PROPERTIES
+				RUNTIME_OUTPUT_DIRECTORY run/Wireshark.app/Contents/MacOS/extcap
+			)
+			# Add a wrapper script which runs each executable from the
+			# correct location. This adds convenience but makes debugging
+			# more difficult.
+			file(REMOVE ${CMAKE_BINARY_DIR}/run/${_executable})
+			file(WRITE ${CMAKE_BINARY_DIR}/run/${_executable} "#!/bin/sh\n")
+			file(APPEND ${CMAKE_BINARY_DIR}/run/${_executable} "exec ${CMAKE_BINARY_DIR}/run/Wireshark.app/Contents/MacOS/extcap/${_executable} \"\$\@\"\n")
+			execute_process(COMMAND chmod a+x ${CMAKE_BINARY_DIR}/run/${_executable})
+		endif()
 	endif()
 endmacro()
 
@@ -2385,7 +2407,7 @@ CHECKAPI(
 	${WIRESHARK_SRC}
 )
 
-set(CMAKE_INSTALL_MODULES_DIR ${CMAKE_INSTALL_LIBDIR}/@CPACK_PACKAGE_NAME@)
+set(CMAKE_INSTALL_MODULES_DIR ${CMAKE_INSTALL_LIBDIR}/${CPACK_PACKAGE_NAME})
 configure_file("${CMAKE_MODULE_PATH}/WiresharkConfig.cmake.in" "${CMAKE_BINARY_DIR}/WiresharkConfig.cmake" @ONLY)
 configure_file("${CMAKE_MODULE_PATH}/WiresharkConfigVersion.cmake.in" "${CMAKE_BINARY_DIR}/WiresharkConfigVersion.cmake" @ONLY)
 install(

@@ -78,6 +78,9 @@ struct expert_field;
 /** Make a const val64_string[] look like a _val64_string pointer, used to set header_field_info.strings */
 #define VALS64(x)   (const struct _val64_string*)(x)
 
+/** Something to satisfy checkAPIs when you have a pointer to a value_string_ext (e.g., one built with value_string_ext_new()) */
+#define VALS_EXT_PTR(x) (x)
+
 /** Make a const true_false_string[] look like a _true_false_string pointer, used to set header_field_info.strings */
 #define TFS(x)	(const struct true_false_string*)(x)
 
@@ -2399,7 +2402,7 @@ proto_tree_add_bitmask_value_with_flags(proto_tree *tree, tvbuff_t *tvb, const g
         FT_integer fields that have a value_string attached will have the
         matched string displayed on the expansion line.
  @param encoding big or little endian byte representation (ENC_BIG_ENDIAN/ENC_LITTLE_ENDIAN/ENC_HOST_ENDIAN)
- @return the newly created item */
+ */
 WS_DLL_PUBLIC void
 proto_tree_add_bitmask_list(proto_tree *tree, tvbuff_t *tvb, const guint offset,
 								const int len, const int **fields, const guint encoding);

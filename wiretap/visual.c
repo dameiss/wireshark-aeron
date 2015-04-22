@@ -141,14 +141,14 @@ struct visual_read_info
 {
     guint32 num_pkts;           /* Number of pkts in the file */
     guint32 current_pkt;        /* Next packet to be read */
-    double  start_time;         /* Capture start time in microseconds */
+    time_t  start_time;         /* Capture start time in seconds */
 };
 
 
 /* Additional information for writing Visual files */
 struct visual_write_info
 {
-    guint start_time;        /* Capture start time in seconds */
+    time_t  start_time;         /* Capture start time in seconds */
     int     index_table_index;  /* Index of the next index entry */
     int     index_table_size;   /* Allocated size of the index table */
     guint32 * index_table;      /* File offsets for the packets */
@@ -254,13 +254,13 @@ wtap_open_return_val visual_open(wtap *wth, int *err, gchar **err_info)
     /* Set up the pointers to the handlers for this file type */
     wth->subtype_read = visual_read;
     wth->subtype_seek_read = visual_seek_read;
-    wth->file_tsprec = WTAP_TSPREC_USEC;
+    wth->file_tsprec = WTAP_TSPREC_MSEC;
 
     /* Add Visual-specific information to the wiretap struct for later use. */
     visual = (struct visual_read_info *)g_malloc(sizeof(struct visual_read_info));
     wth->priv = (void *)visual;
     visual->num_pkts = pletoh32(&vfile_hdr.num_pkts);
-    visual->start_time = ((double) pletoh32(&vfile_hdr.start_time)) * 1000000;
+    visual->start_time = pletoh32(&vfile_hdr.start_time);
     visual->current_pkt = 1;
 
     return WTAP_OPEN_MINE;
@@ -317,9 +317,7 @@ visual_read_packet(wtap *wth, FILE_T fh, struct wtap_pkthdr *phdr,
     struct visual_pkt_hdr vpkt_hdr;
     guint32 packet_size;
     struct visual_atm_hdr vatm_hdr;
-    double  t;
-    time_t  secs;
-    guint32 usecs;
+    guint32 relmsecs;
     guint32 packet_status;
     guint8 *pd;
 
@@ -336,12 +334,9 @@ visual_read_packet(wtap *wth, FILE_T fh, struct wtap_pkthdr *phdr,
     phdr->presence_flags = WTAP_HAS_TS|WTAP_HAS_CAP_LEN;
 
     /* Set the packet time and length. */
-    t = visual->start_time;
-    t += ((double)pletoh32(&vpkt_hdr.ts_delta))*1000;
-    secs = (time_t)(t/1000000);
-    usecs = (guint32)(t - secs*1000000);
-    phdr->ts.secs = secs;
-    phdr->ts.nsecs = usecs * 1000;
+    relmsecs = pletoh32(&vpkt_hdr.ts_delta);
+    phdr->ts.secs = visual->start_time + relmsecs/1000;
+    phdr->ts.nsecs = (relmsecs % 1000)*1000000;
 
     phdr->len = pletoh16(&vpkt_hdr.orig_len);
 
@@ -677,7 +672,7 @@ static gboolean visual_dump(wtap_dumper *wdh, const struct wtap_pkthdr *phdr,
     if (visual->index_table_index == 0)
     {
         /* This is the first packet.  Save its start time as the file time. */
-        visual->start_time = (guint32) phdr->ts.secs;
+        visual->start_time = phdr->ts.secs;
 
         /* Initialize the index table */
         visual->index_table = (guint32 *)g_malloc(1024 * sizeof *visual->index_table);
@@ -686,7 +681,7 @@ static gboolean visual_dump(wtap_dumper *wdh, const struct wtap_pkthdr *phdr,
 
     /* Calculate milliseconds since capture start. */
     delta_msec = phdr->ts.nsecs / 1000000;
-    delta_msec += ( (guint32) phdr->ts.secs - visual->start_time) * 1000;
+    delta_msec += (guint32)((phdr->ts.secs - visual->start_time) * 1000);
     vpkt_hdr.ts_delta = GUINT32_TO_LE(delta_msec);
 
     /* Fill in the length fields. */

@@ -102,6 +102,15 @@ WS_DLL_PUBLIC double nstime_to_msec(const nstime_t *nstime);
 /** converts nstime to double, time base is seconds */
 WS_DLL_PUBLIC double nstime_to_sec(const nstime_t *nstime);
 
+/** converts Windows FILETIME to nstime, returns TRUE on success,
+    FALSE on failure */
+WS_DLL_PUBLIC gboolean filetime_to_nstime(nstime_t *nstime, guint64 filetime);
+
+/** converts time like Windows FILETIME, but expressed in nanoseconds
+    rather than tenths of microseconds, to nstime, returns TRUE on success,
+    FALSE on failure */
+WS_DLL_PUBLIC gboolean nsfiletime_to_nstime(nstime_t *nstime, guint64 nsfiletime);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
