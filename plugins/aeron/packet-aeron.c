@@ -1335,24 +1335,16 @@ static void aeron_sequence_setup(packet_info * pinfo, aeron_transport_t * transp
                         if (info->offset != NULL)
                         {
                             aeron_stream_rcv_t * rcv = NULL;
-                            /*
-                                dp is the current data position (from this frame).
-                                dpv is TRUE for data frames.
-                            */
+                            /*  dp is the current data position (from this frame). */
                             aeron_pos_t dp;
-                            gboolean dpv = FALSE;
                             /*
                                 pdp is the previous (high) data position (from the stream).
                                 pdpv is TRUE if pdp is valid (meaning we previously saw a data message).
                             */
                             aeron_pos_t pdp = stream->high;
                             gboolean pdpv = ((stream->flags & AERON_STREAM_FLAGS_HIGH_VALID) != 0);
-                            /*
-                                rp is the current receiver position (from this frame).
-                                rpv is TRUE for status frames.
-                            */
+                            /*  rp is the current receiver position (from this frame). */
                             aeron_pos_t rp;
-                            gboolean rpv = FALSE;
                             /*
                                 prp is the previous (high) receiver completed position (from the stream receiver).
                                 prpv is TRUE if prp is valid (meaning we previously saw a status message).
@@ -1385,7 +1377,6 @@ static void aeron_sequence_setup(packet_info * pinfo, aeron_transport_t * transp
                                     dp.term_id = *(info->term_id);
                                     dp.term_offset = *(info->offset);
                                     aeron_pos_add_length(&dp, info->len, stream->term_length);
-                                    dpv = TRUE;
                                     if (pdpv)
                                     {
                                         if (dp.term_id > stream->high.term_id)
@@ -1408,7 +1399,6 @@ static void aeron_sequence_setup(packet_info * pinfo, aeron_transport_t * transp
                                 case HDR_TYPE_SM:
                                     rp.term_id = *(info->term_id);
                                     rp.term_offset = *(info->offset);
-                                    rpv = TRUE;
                                     if (prpv)
                                     {
                                         if (rp.term_id > rcv->completed.term_id)
