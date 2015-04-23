@@ -3276,6 +3276,7 @@ AC_OUTPUT(
   plugins/wimaxasncp/Makefile
   plugins/wimaxmacphy/Makefile
   plugins/aeron/Makefile
+  plugins/aeron-hsd/Makefile
   tools/Makefile
   tools/lemon/Makefile
   wiretap/Makefile

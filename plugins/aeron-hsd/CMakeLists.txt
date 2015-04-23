@@ -22,10 +22,10 @@
 include(WiresharkPlugin)
 
 # This info is from moduleinfo.nmake
-set_module_info(aeron 0 4 0 0)
+set_module_info(aeron-hsd 0 1 0 0)
 
 set(DISSECTOR_SRC
-	packet-aeron.c
+	packet-aeron-hsd.c
 )
 
 set(PLUGIN_FILES
@@ -52,9 +52,9 @@ register_dissector_files(plugin.c
 	${DISSECTOR_SRC}
 )
 
-add_plugin_library(aeron)
+add_plugin_library(aeron-hsd)
 
-install(TARGETS aeron
+install(TARGETS aeron-hsd
 	LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/@CPACK_PACKAGE_NAME@/plugins/${CPACK_PACKAGE_VERSION} NAMELINK_SKIP
 	RUNTIME DESTINATION ${CMAKE_INSTALL_LIBDIR}/@CPACK_PACKAGE_NAME@/plugins/${CPACK_PACKAGE_VERSION}
 	ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/@CPACK_PACKAGE_NAME@/plugins/${CPACK_PACKAGE_VERSION}

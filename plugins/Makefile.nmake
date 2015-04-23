@@ -18,7 +18,8 @@ PLUGIN_LIST = \
 	wimax       \
 	wimaxasncp  \
 	wimaxmacphy \
-	aeron
+	aeron       \
+	aeron-hsd
 
 
 all:

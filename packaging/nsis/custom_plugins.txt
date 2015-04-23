@@ -1,3 +1,4 @@
 ;Add your custom plugins directives here
 ; Example:
 File "${STAGING_DIR}\plugins\aeron.dll"
+File "${STAGING_DIR}\plugins\aeron-hsd.dll"

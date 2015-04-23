@@ -978,6 +978,7 @@ if(ENABLE_PLUGINS)
 		plugins/wimaxasncp
 		plugins/wimaxmacphy
 		plugins/aeron
+		plugins/aeron-hsd
 		${CUSTOM_PLUGIN_SRC_DIR}
 	)
 # It seems this stuff doesn't build with autofoo either...

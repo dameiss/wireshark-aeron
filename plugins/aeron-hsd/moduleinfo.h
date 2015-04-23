@@ -28,12 +28,12 @@
 #endif
 
 /* Name of package */
-#define PACKAGE "aeron"
+#define PACKAGE "aeron-hsd"
 
 #ifdef VERSION
 #undef VERSION
 #endif
 
 /* Version number of package */
-#define VERSION "0.4.0"
+#define VERSION "0.1.0"
  

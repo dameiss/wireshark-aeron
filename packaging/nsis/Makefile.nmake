@@ -60,6 +60,7 @@ PLUGINS= \
 	../../plugins/wimaxasncp/wimaxasncp.dll \
 	../../plugins/wimaxmacphy/wimaxmacphy.dll \
 	../../plugins/aeron/aeron.dll \
+	../../plugins/aeron-hsd/aeron-hsd.dll \
 	$(CUSTOM_PLUGINS)
 
 NSI=\

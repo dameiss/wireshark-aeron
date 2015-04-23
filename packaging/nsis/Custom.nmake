@@ -2,5 +2,6 @@
 # Add your custom plugins here
 CUSTOM_PLUGINS= \
 # Example:
- 	../../plugins/aeron/aeron.dll 	
+ 	../../plugins/aeron/aeron.dll 	\
+ 	../../plugins/aeron-hsd/aeron-hsd.dll
 
