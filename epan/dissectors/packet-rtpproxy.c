@@ -120,6 +120,10 @@ static const string_string versiontypenames[] = {
     { "20081102", "Support for setting codecs in the update/lookup command" },
     { "20081224", "Support for session timeout notifications" },
     { "20090810", "Support for automatic bridging" },
+    { "20140323", "Support for tracking/reporting load" },
+    { "20140617", "Support for anchoring session connect time" },
+    { "20141004", "Support for extendable performance counters" },
+    { "20150330", "Support for allocating a new port (\"Un\"/\"Ln\" commands)" },
     { 0, NULL }
 };
 
@@ -207,20 +211,44 @@ static const value_string oktypenames[] = {
 };
 
 static const string_string errortypenames[] = {
-    { "E0", "Syntax error" },
-    { "E1", "Syntax error" },
-    { "E2", "Syntax error" },
-    { "E3", "Unknown command" },
-    { "E4", "Syntax error" },
-    { "E5", "Out of memory" },
-    { "E6", "<no description>" },
-    { "E7", "Software error (can't create listener)" },
-    { "E8", "Not Found" },
-    { "E10", "Software error (can't create listener)" },
-    { "E11", "Out of memory" },
-    { "E12", "Out of memory" },
-    { "E13", "Out of memory" },
-    { "E14", "Out of memory" },
+    { "E0", "Syntax error: unknown command (CMDUNKN)" },
+    { "E1", "Syntax error: wrond number of arguments (PARSE_NARGS)" },
+    { "E2", "Syntax error: unknown modifiers (PARSE_MODS)" },
+    { "E5", "PARSE_1" },
+    { "E6", "PARSE_2" },
+    { "E7", "PARSE_3" },
+    { "E8", "PARSE_4" },
+    { "E9", "PARSE_5" },
+    { "E10", "PARSE_10" },
+    { "E11", "PARSE_11" },
+    { "E12", "PARSE_12" },
+    { "E13", "PARSE_13" },
+    { "E14", "PARSE_14" },
+    { "E15", "PARSE_15" },
+    { "E16", "PARSE_16" },
+    { "E17", "PARSE_6" },
+    { "E18", "PARSE_7" },
+    { "E25", "Software error: return string too big (RTOOBIG_1)" },
+    { "E31", "INVLARG_1" },
+    { "E32", "INVLARG_2" },
+    { "E33", "INVLARG_3" },
+    { "E34", "INVLARG_4" },
+    { "E35", "INVLARG_5" },
+    { "E50", "SESUNKN" },
+    { "E60", "PLRFAIL" },
+    { "E65", "CPYFAIL" },
+    { "E68", "STSFAIL" },
+    { "E71", "Software error: can't create listener (LSTFAIL_1)" },
+    { "E72", "Software error: can't create listener (LSTFAIL_2)" },
+    { "E81", "Out of memory (NOMEM_1)" },
+    { "E82", "Out of memory (NOMEM_2)" },
+    { "E83", "Out of memory (NOMEM_3)" },
+    { "E84", "Out of memory (NOMEM_4)" },
+    { "E85", "Out of memory (NOMEM_5)" },
+    { "E86", "Out of memory (NOMEM_6)" },
+    { "E87", "Out of memory (NOMEM_7)" },
+    { "E88", "Out of memory (NOMEM_8)" },
+    { "E99", "Software error: proxy is in the deorbiting-burn mode, new session rejected (SLOWSHTDN)" },
     { 0, NULL }
 };
 
@@ -409,11 +437,9 @@ rtpproxy_add_tid(gboolean is_request, tvbuff_t *tvb, packet_info *pinfo, proto_t
 
     if (!PINFO_FD_VISITED(pinfo)) {
         if (is_request){
-            rtpproxy_info = wmem_new(wmem_file_scope(), rtpproxy_info_t);
+            rtpproxy_info = wmem_new0(wmem_file_scope(), rtpproxy_info_t);
             rtpproxy_info->req_frame = PINFO_FD_NUM(pinfo);
-            rtpproxy_info->resp_frame = 0;
             rtpproxy_info->req_time = pinfo->fd->abs_ts;
-            rtpproxy_info->callid = NULL;
             wmem_tree_insert_string(rtpproxy_conv->trans, cookie, rtpproxy_info, 0);
         } else {
             rtpproxy_info = (rtpproxy_info_t *)wmem_tree_lookup_string(rtpproxy_conv->trans, cookie, 0);

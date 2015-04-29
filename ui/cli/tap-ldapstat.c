@@ -1,6 +1,6 @@
-/* tap-afpstat.c
- * Based on
- * smbstat   2003 Ronnie Sahlberg
+/* tap-ldapstat.c
+ *
+ * Based on afpstat
  *
  * Wireshark - Network traffic analyzer
  * By Gerald Combs <gerald@wireshark.org>
@@ -32,91 +32,107 @@
 #include <epan/stat_tap_ui.h>
 #include <ui/cli/cli_service_response_time_table.h>
 #include <epan/value_string.h>
-#include <epan/dissectors/packet-afp.h>
+#include <epan/dissectors/packet-ldap.h>
 #include "epan/timestats.h"
 
-void register_tap_listener_afpstat(void);
+void register_tap_listener_ldapstat(void);
 
-#define AFP_NUM_PROCEDURES     256
+#define LDAP_NUM_PROCEDURES     24
 
 /* used to keep track of the statistics for an entire program interface */
-typedef struct _afpstat_t {
-	srt_stat_table afp_srt_table;
-} afpstat_t;
+typedef struct _ldapstat_t {
+	srt_stat_table ldap_srt_table;
+} ldapstat_t;
 
 static int
-afpstat_packet(void *pss, packet_info *pinfo, epan_dissect_t *edt _U_, const void *prv)
+ldapstat_packet(void *pldap, packet_info *pinfo, epan_dissect_t *edt _U_, const void *psi)
 {
-	afpstat_t *ss = (afpstat_t *)pss;
-	const afp_request_val *request_val = (const afp_request_val *)prv;
+	const ldap_call_response_t *ldap=(const ldap_call_response_t *)psi;
+	ldapstat_t *fs=(ldapstat_t *)pldap;
 
+	/* we are only interested in reply packets */
+	if(ldap->is_request){
+		return 0;
+	}
 	/* if we havnt seen the request, just ignore it */
-	if (!request_val) {
+	if(!ldap->req_frame){
 		return 0;
 	}
 
-	add_srt_table_data(&ss->afp_srt_table, request_val->command, &request_val->req_time, pinfo);
+	/* only use the commands we know how to handle */
+	switch(ldap->protocolOpTag){
+	case LDAP_REQ_BIND:
+	case LDAP_REQ_SEARCH:
+	case LDAP_REQ_MODIFY:
+	case LDAP_REQ_ADD:
+	case LDAP_REQ_DELETE:
+	case LDAP_REQ_MODRDN:
+	case LDAP_REQ_COMPARE:
+	case LDAP_REQ_EXTENDED:
+		break;
+	default:
+		return 0;
+	}
 
+	add_srt_table_data(&fs->ldap_srt_table, ldap->protocolOpTag, &ldap->req_time, pinfo);
 	return 1;
 }
 
 static void
-afpstat_draw(void *pss)
+ldapstat_draw(void *pss)
 {
-	afpstat_t *ss = (afpstat_t *)pss;
+	ldapstat_t *ss = (ldapstat_t *)pss;
 
-	draw_srt_table_data(&ss->afp_srt_table, TRUE, TRUE);
+	draw_srt_table_data(&ss->ldap_srt_table, TRUE, TRUE);
 }
 
 
 static void
-afpstat_init(const char *opt_arg, void *userdata _U_)
+ldapstat_init(const char *opt_arg, void *userdata _U_)
 {
-	afpstat_t *ss;
-	guint32 i;
+	ldapstat_t *ldap;
 	const char *filter = NULL;
 	GString *error_string;
+	int i;
 
-	if (!strncmp(opt_arg, "afp,srt,", 8)) {
+	if (!strncmp(opt_arg, "ldap,srt,", 9)) {
 		filter = opt_arg+8;
 	}
 
-	ss = g_new(afpstat_t, 1);
+	ldap = g_new(ldapstat_t,1);
 
-	init_srt_table("AFP", &ss->afp_srt_table, AFP_NUM_PROCEDURES, NULL, filter ? g_strdup(filter) : NULL);
-	for (i = 0; i < AFP_NUM_PROCEDURES; i++)
+	init_srt_table("LDAP", &ldap->ldap_srt_table, LDAP_NUM_PROCEDURES, NULL, filter ? g_strdup(filter) : NULL);
+	for (i = 0; i < LDAP_NUM_PROCEDURES; i++)
 	{
-		gchar* tmp_str = val_to_str_ext_wmem(NULL, i, &CommandCode_vals_ext, "Unknown(%u)");
-		init_srt_table_row(&ss->afp_srt_table, i, tmp_str);
-		wmem_free(NULL, tmp_str);
+		init_srt_table_row(&ldap->ldap_srt_table, i, val_to_str_const(i, ldap_procedure_names, "<unknown>"));
 	}
 
-	error_string = register_tap_listener("afp", ss, filter, 0, NULL, afpstat_packet, afpstat_draw);
+	error_string = register_tap_listener("ldap", ldap, filter, 0, NULL, ldapstat_packet, ldapstat_draw);
 	if (error_string) {
 		/* error, we failed to attach to the tap. clean up */
-		free_srt_table_data(&ss->afp_srt_table);
-		g_free(ss);
+		free_srt_table_data(&ldap->ldap_srt_table);
+		g_free(ldap);
 
-		fprintf(stderr, "tshark: Couldn't register afp,srt tap: %s\n",
+		fprintf(stderr, "tshark: Couldn't register ldap,srt tap: %s\n",
 		    error_string->str);
 		g_string_free(error_string, TRUE);
 		exit(1);
 	}
 }
 
-static stat_tap_ui afpstat_ui = {
+static stat_tap_ui ldapstat_ui = {
 	REGISTER_STAT_GROUP_GENERIC,
 	NULL,
-	"afp,srt",
-	afpstat_init,
+	"ldap,srt",
+	ldapstat_init,
 	0,
 	NULL
 };
 
 void
-register_tap_listener_afpstat(void)
+register_tap_listener_ldapstat(void)
 {
-	register_stat_tap_ui(&afpstat_ui, NULL);
+	register_stat_tap_ui(&ldapstat_ui, NULL);
 }
 
 /*

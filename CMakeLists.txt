@@ -84,18 +84,18 @@ if(WIN32)
 	file (TO_NATIVE_PATH ${CMAKE_SOURCE_DIR}/tools/win-setup.ps1 _win_setup)
 	file (TO_NATIVE_PATH "$ENV{WIRESHARK_BASE_DIR}/wireshark-${WIRESHARK_TARGET_PLATFORM}-libs" _ws_lib_dir)
 	if(MSVC12)
-		set(_vsversion_args "-VSVersion 12")
+		set(_vsversion_args "12")
 	elseif(MSVC11)
-		set(_vsversion_args "-VSVersion 11")
+		set(_vsversion_args "11")
 	elseif(MSVC10)
-		set(_vsversion_args "-VSVersion 10")
+		set(_vsversion_args "10")
 	endif()
 
 	# Is it possible to have a one-time, non-cached option in CMake? If
 	# so, we could add a "-DFORCE_WIN_SETUP" which passes -Force to
 	# win-setup.ps1.
 	execute_process(
-		COMMAND ${POWERSHELL_COMMAND} "${_win_setup}" -Destination "${_ws_lib_dir}" -Platform ${WIRESHARK_TARGET_PLATFORM} ${_vsversion_args}
+		COMMAND ${POWERSHELL_COMMAND} "${_win_setup}" -Destination "${_ws_lib_dir}" -Platform ${WIRESHARK_TARGET_PLATFORM} -VSVersion ${_vsversion_args}
 		RESULT_VARIABLE _win_setup_failed
 	)
 	if (${_win_setup_failed})
@@ -1118,6 +1118,7 @@ if(ENABLE_EXTCAP)
 endif()
 
 set(TSHARK_TAP_SRC
+	ui/cli/cli_service_response_time_table.c
 	ui/cli/tap-afpstat.c
 	ui/cli/tap-ansi_astat.c
 	ui/cli/tap-bootpstat.c
@@ -1139,6 +1140,7 @@ set(TSHARK_TAP_SRC
 	ui/cli/tap-icmpv6stat.c
 	ui/cli/tap-iostat.c
 	ui/cli/tap-iousers.c
+	ui/cli/tap-ldapstat.c
 	ui/cli/tap-macltestat.c
 	ui/cli/tap-mgcpstat.c
 	ui/cli/tap-megacostat.c
@@ -1154,6 +1156,7 @@ set(TSHARK_TAP_SRC
 	ui/cli/tap-sctpchunkstat.c
 	ui/cli/tap-sipstat.c
 	ui/cli/tap-smbsids.c
+	ui/cli/tap-smb2stat.c
 	ui/cli/tap-smbstat.c
 	ui/cli/tap-stats_tree.c
 	ui/cli/tap-sv.c
