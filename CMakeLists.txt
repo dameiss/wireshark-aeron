@@ -25,7 +25,8 @@ message(STATUS "Generating build using CMake ${CMAKE_VERSION}")
 if(WIN32)
 	# Needed for proper Qt linking. See
 	# http://www.cmake.org/cmake/help/v3.0/policy/CMP0020.html
-	cmake_minimum_required(VERSION 2.8.11)
+	# 3.1.3 is the currently supported version
+	cmake_minimum_required(VERSION 3.1.3)
 else()
 	cmake_minimum_required(VERSION 2.8.3)
 endif()
@@ -47,6 +48,11 @@ if (POLICY CMP0026)
 	cmake_policy(SET CMP0026 OLD)
 endif()
 
+# Set old behaviour for variable quoting
+if (POLICY CMP0054)
+	cmake_policy(SET CMP0054 OLD)
+endif()
+
 # If our target platform is enforced by our generator, set
 # WIRESHARK_TARGET_PLATFORM accordingly. Otherwise use
 # %WIRESHARK_TARGET_PLATFORM%.
@@ -56,12 +62,16 @@ if(WIN32)
 
 	if("${CMAKE_GENERATOR}" MATCHES "Win64")
 		set(WIRESHARK_TARGET_PLATFORM win64)
-		set(PROCESSOR_ARCHITECTURE amd64)
 	elseif("${CMAKE_GENERATOR}" MATCHES "Visual Studio")
 		set(WIRESHARK_TARGET_PLATFORM win32)
-		set(PROCESSOR_ARCHITECTURE x86)
 	else()
 		set(WIRESHARK_TARGET_PLATFORM $ENV{WIRESHARK_TARGET_PLATFORM})
+	endif()
+
+	if ("${WIRESHARK_TARGET_PLATFORM}" MATCHES "win64")
+		set(PROCESSOR_ARCHITECTURE amd64)
+	else()
+		set(PROCESSOR_ARCHITECTURE x86)
 	endif()
 
 	# Sanity check
@@ -80,15 +90,29 @@ if(WIN32)
 	endif()
 	message(STATUS "Building for ${WIRESHARK_TARGET_PLATFORM} using ${CMAKE_GENERATOR}")
 
+        # Determine where the 3rd party libraries will be
+	if( DEFINED ENV{WIRESHARK_LIB_DIR} )
+		# The buildbots set WIRESHARK_LIB_DIR but not WIRESHARK_BASE_DIR.
+		file( TO_CMAKE_PATH "$ENV{WIRESHARK_LIB_DIR}" _PROJECT_LIB_DIR )
+	elseif( DEFINED ENV{WIRESHARK_BASE_DIR} )
+		file( TO_CMAKE_PATH "$ENV{WIRESHARK_BASE_DIR}" _WS_BASE_DIR )
+		set( _PROJECT_LIB_DIR "${_WS_BASE_DIR}/wireshark-${WIRESHARK_TARGET_PLATFORM}-libs" )
+        else()
+                # Don't know what to do
+                message(FATAL_ERROR "Neither WIRESHARK_BASE_DIR or WIRESHARK_LIB_DIR are defined")
+	endif()
+
 	# Download third-party libraries
 	file (TO_NATIVE_PATH ${CMAKE_SOURCE_DIR}/tools/win-setup.ps1 _win_setup)
-	file (TO_NATIVE_PATH "$ENV{WIRESHARK_BASE_DIR}/wireshark-${WIRESHARK_TARGET_PLATFORM}-libs" _ws_lib_dir)
+	file (TO_NATIVE_PATH ${_PROJECT_LIB_DIR} _ws_lib_dir)
 	if(MSVC12)
 		set(_vsversion_args "12")
 	elseif(MSVC11)
 		set(_vsversion_args "11")
 	elseif(MSVC10)
 		set(_vsversion_args "10")
+	else()
+                message(FATAL_ERROR "Unsupported compiler ${CMAKE_C_COMPILER}")
 	endif()
 
 	# Is it possible to have a one-time, non-cached option in CMake? If
@@ -673,13 +697,6 @@ endif()
 if(ENABLE_ZLIB)
 	if (WIN32)
 		# On Windows we build our own version of zlib, so add the paths
-		if( DEFINED ENV{WIRESHARK_LIB_DIR} )
-			# The buildbots set WIRESHARK_LIB_DIR but not WIRESHARK_BASE_DIR.
-			file( TO_CMAKE_PATH "$ENV{WIRESHARK_LIB_DIR}" _PROJECT_LIB_DIR )
-		else()
-			file( TO_CMAKE_PATH "$ENV{WIRESHARK_BASE_DIR}" _WS_BASE_DIR )
-			set( _PROJECT_LIB_DIR "${_WS_BASE_DIR}/wireshark-${WIRESHARK_TARGET_PLATFORM}-libs" )
-		endif()
 		set(ZLIB_SRC_DIR "${_PROJECT_LIB_DIR}/zlib-1.2.8")
 		add_subdirectory("${ZLIB_SRC_DIR}" "${CMAKE_BINARY_DIR}/zlib")
 		set(ZLIB_INCLUDE_DIR  "${ZLIB_SRC_DIR}" "${CMAKE_BINARY_DIR}/zlib")
@@ -1144,6 +1161,7 @@ set(TSHARK_TAP_SRC
 	ui/cli/tap-macltestat.c
 	ui/cli/tap-mgcpstat.c
 	ui/cli/tap-megacostat.c
+	ui/cli/tap-ncpstat.c
 	ui/cli/tap-protocolinfo.c
 	ui/cli/tap-protohierstat.c
 	ui/cli/tap-radiusstat.c
